@@ -1,8 +1,245 @@
-/*
+/* Sidebar container elements */
+.z5-linter-info { margin-bottom: 8px; }
+.z5-linter-toolbar { display: flex; gap: 8px; margin: 8px 0; }
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+/* Lists */
+.z5-linter-results { list-style: none; padding: 0; margin: 8px 0; }
+.z5-linter-results li {
+  padding: 8px 10px;
+  margin: 6px 0;
+  border-radius: var(--radius-s);
+  transition: background-color 0.15s ease;
+}
+.z5-linter-results.hidden { display: none; }
 
-If your plugin does not need CSS, delete this file.
+/* Arrow rotation when open */
+.z5-linter-head-block .z5-linter-head-arrow { display: inline-block; transition: transform 0.15s ease; }
+.z5-linter-head-block.open .z5-linter-head-arrow { transform: rotate(90deg); }
 
-*/
+/* List item hover */
+.z5-linter-results li:hover { background-color: var(--background-modifier-hover); cursor: pointer; }
+
+/* Severity backgrounds (subtle, theme-aware) */
+.z5-linter-error {
+  background-color: color-mix(in srgb, var(--text-error) 10%, var(--background-primary));
+  border-left: 4px solid var(--text-error);
+}
+.z5-linter-warning {
+  background-color: color-mix(in srgb, var(--text-warning) 10%, var(--background-primary));
+  border-left: 4px solid var(--text-warning);
+}
+.z5-linter-info {
+  background-color: color-mix(in srgb, var(--text-accent) 10%, var(--background-primary));
+  border-left: 4px solid var(--text-accent);
+}
+
+/* Metadata text */
+.z5-linter-field { font-size: 0.85em; color: var(--text-muted); margin-top: 4px; }
+.z5-linter-rule { font-size: 0.75em; color: var(--text-muted); margin-top: 2px; }
+.z5-linter-sticky-note { font-size: 0.85em; color: var(--text-muted); margin-bottom: 6px; }
+
+/* Header container */
+.z5-linter-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+}
+
+/* Header blocks (compact) */
+.z5-linter-head-block {
+  display: inline-flex;
+  flex-direction: row; /* icon left by default; change to row-reverse if you prefer icon right */
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+}
+
+/* Header icon sizing and svg behavior */
+.z5-linter-head-block .z5-ls-icon {
+  width: var(--icon-size-s, 14px);
+  height: var(--icon-size-s, 14px);
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.z5-linter-head-block .z5-ls-icon svg {
+  width: 100%;
+  height: 100%;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  vertical-align: middle;
+}
+
+/* Header count */
+.z5-linter-head-count {
+  min-width: 1ch;
+  max-width: 2ch;
+  text-align: right;
+  font-family: var(--font-monospace);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* Header hover behavior */
+.z5-linter-head-block:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.z5-linter-head-block.err:hover  { color: var(--text-error); }
+.z5-linter-head-block.warn:hover { color: var(--text-warning); }
+.z5-linter-head-block.info:hover { color: var(--text-accent); }
+
+/* Active file boxed panel */
+.z5-linter-active-box {
+  margin: 8px;
+  padding: 8px;
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+}
+.z5-linter-active-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  padding-left: 4px;
+  letter-spacing: 0.02em;
+}
+.z5-linter-active-content .z5-linter-header {
+  padding: 6px 8px;
+  gap: 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  margin-bottom: 8px;
+}
+.z5-linter-active-content .z5-linter-results { margin: 0; padding: 0; list-style: none; }
+.z5-linter-active-content .z5-linter-results li { padding: 8px 10px; margin: 6px 0; border-radius: var(--radius-s); }
+
+/* Vault box */
+.z5-linter-vault-box {
+  margin: 8px;
+  padding: 8px;
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+}
+
+/* Status bar container */
+.z5-linter-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+  font-family: var(--font-monospace);
+  border-radius: var(--radius-s);
+  transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+  color: var(--text-muted);
+  opacity: 0.9;
+}
+
+/* Ensure hover background applies to the status bar container */
+.z5-linter-status:hover,
+.z5-linter-status:focus-within {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+  opacity: 1;
+}
+
+/* Status segments: compact, icon on the right */
+.z5-ls {
+  display: inline-flex;
+  flex-direction: row-reverse; /* icon to the right of the count */
+  align-items: center;
+  gap: 4px;
+  min-width: 2.6em;
+  padding: 2px 4px;
+  text-align: left;
+  background: transparent; /* ensure container hover shows through */
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+/* Status icon wrapper and svg */
+.z5-ls .z5-ls-icon {
+  width: var(--icon-size-s, 14px);
+  height: var(--icon-size-s, 14px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+}
+.z5-ls .z5-ls-icon svg {
+  width: 100%;
+  height: 100%;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  vertical-align: middle;
+}
+
+/* Status counts */
+.z5-ls-count {
+  min-width: 1.2ch;
+  max-width: 2.2ch;
+  text-align: right;
+  font-family: var(--font-monospace);
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+  line-height: 1;
+}
+
+/* Status hover tinting for severities */
+.z5-ls.err, .z5-ls.warn, .z5-ls.info { color: var(--text-muted); }
+.z5-linter-status:hover .z5-ls.err  { color: var(--text-error); }
+.z5-linter-status:hover .z5-ls.warn { color: var(--text-warning); }
+.z5-linter-status:hover .z5-ls.info { color: var(--text-normal); }
+
+/* Defensive resets to avoid theme/global overrides */
+.z5-ls-icon, .z5-ls-icon svg, .z5-linter-head-block .z5-ls-icon, .z5-linter-head-block .z5-ls-icon svg {
+  margin: 0 !important;
+  padding: 0 !important;
+  display: inline-block !important;
+  vertical-align: middle !important;
+}
+
+
+/* Make icon wrapper a true centered box and remove baseline quirks */
+.z5-ls-icon,
+.z5-linter-head-block .z5-ls-icon {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  line-height: 0 !important;        /* prevents baseline offset */
+  vertical-align: middle !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Force SVG to be block-level so it doesn't sit on the text baseline */
+.z5-ls-icon svg,
+.z5-linter-head-block .z5-ls-icon svg {
+  display: block !important;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  vertical-align: middle;
+}
+
+
+
+/* Reports folder validation icon */
+.z5-reports-validate-icon svg { width: 14px; height: 14px; stroke-width: 1.8; vertical-align: middle; }
+.z5-reports-valid { color: var(--interactive-accent); }   /* green / accent for valid */
+.z5-reports-invalid { color: var(--text-error); }         /* red for invalid */
+
