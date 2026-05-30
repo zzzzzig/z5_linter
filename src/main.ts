@@ -8,16 +8,41 @@ import { createStatusBar as createStatusBarUI, updateStatusBarCounts as updateSt
 
 const VIEW_TYPE_LINTER = "z5-linter-view";
 
+
+// This is the plugin itself. Everything goes through here.
 export default class z5Linter extends Plugin {
-  settings: z5LinterSettings;
+
+  // the class we access settings though, given a name
+  public settings: z5LinterSettings;
+
+  // the linter engine, which runs the actual linting operations
   public linter: Z5LinterEngine;
+
+  // the settings page itself
   public settingsTabInstance: z5LinterSettingsTab | null = null;
+
+  // the sidebar instance. it registers itself by calling plugin.registerSidebarInstance().
+  private sidebarInstance: LinterSidebarView | null = null;
+
+  // a blank table in which we store whatever linting results occurred most recently
+  // concern: are we sharing single-file and full-vault results here?
+  // will single-file results during a full-vault lint cause issues?
   public latestLintResults: LintResult[] = [];
+
+  // used for debouncing the UI refresh. 
   private refreshTimer: number | null = null;
+
+  // the sidebar we use for our UI
+  // TODO: rename this to something less shit
+  // TODO: shouldn't this live in sidebar.ts?
   private _canonicalSchemaLeaf: WorkspaceLeaf | null = null;
+
+  // The HTML element we use for our status bar
+  // TODO: shouldn't this live in status_bar.ts?
   private statusBarEl: HTMLElement | null = null;
 
   async onload() {
+    // loads our settings data, required for 
     await this.loadSettings();
 
     // instantiate linter engine (it reads plugin.settings internally)
@@ -38,6 +63,13 @@ export default class z5Linter extends Plugin {
       name: "Run vault lint and save report",
       callback: async () => { await this.runVaultLintAndSave(); }
     });
+
+    // Ribbon button
+    // Add ribbon icon to open the sidebar (reuses existing leaf if present)
+    this.addRibbonIcon('dice', 'Open Schema YAML', async () => {
+      await this.openSchemaSidebar();
+    });
+
 
     // Settings tab
     this.settingsTabInstance = new z5LinterSettingsTab(this.app, this);
@@ -64,7 +96,7 @@ export default class z5Linter extends Plugin {
     // Workspace events
     this.registerEvent(this.app.workspace.on("layout-change", () => this.resolveCanonicalLeaf()));
     this.registerEvent(this.app.workspace.on("active-leaf-change", async () => {
-      await this.linter.onActiveLeafChange();
+      //await this.linter.onActiveLeafChange();
       // lightweight update of sidebar active-file UI
       await this.updateSidebarForActiveFile();
     }));
@@ -83,10 +115,12 @@ export default class z5Linter extends Plugin {
     this.removeStatusBar();
   }
 
+  // load settings from obsidian
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<z5LinterSettings>);
   }
 
+  // saves settings after modification
   async saveSettings() {
     await this.saveData(this.settings);
     // propagate settings to engine and schedule light refresh
@@ -133,6 +167,15 @@ export default class z5Linter extends Plugin {
       if (canonical) {
         await canonical.setViewState({ type: VIEW_TYPE_LINTER, active: true });
         this.app.workspace.revealLeaf(canonical);
+        setTimeout(() => {
+          try {
+            const view = (canonical.view as any);
+            if (view?.containerEl && typeof view.containerEl.focus === 'function') {
+              view.containerEl.focus();
+            }
+          } catch (e) {}
+        }, 40);
+
         // lightweight update
         await this.updateSidebarForActiveFile();
         return canonical;
@@ -161,15 +204,22 @@ export default class z5Linter extends Plugin {
   // Lightweight updater: refresh active-file results into any open sidebar view
   public async updateSidebarForActiveFile(): Promise<void> {
     try {
-      await refreshActiveFileFromEngine(this);
+      const results = await this.linter.runLintForActiveFile();
+      this.latestLintResults = results;
+
+      if (this.sidebarInstance) {
+          this.sidebarInstance.updateHeaderCounts(results);
+          this.sidebarInstance.renderResults(results);
+      }
+
     } catch (err) {
       console.warn("z5Linter: updateSidebarForActiveFile failed", err);
     }
   }
 
-  // Backwards-compatible no-op so old call sites don't throw
-  public async refreshSchemaViews(): Promise<void> {
-    return;
+  // called by the sidebar on creation. used to register the sidebar here, in the plugin. 
+  public registerSidebarInstance(view: LinterSidebarView) {
+    this.sidebarInstance = view;
   }
 
   // Status bar helpers (thin wrappers to the status_bar module)
@@ -177,10 +227,12 @@ export default class z5Linter extends Plugin {
     const el = createStatusBarUI(this);
     this.statusBarEl = el;
   }
+
   public removeStatusBar() {
     removeStatusBarUI();
     this.statusBarEl = null;
   }
+  
   public updateStatusBarCounts(results: LintResult[]) {
     updateStatusBarUI(results);
   }

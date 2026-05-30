@@ -22,6 +22,9 @@ export class LinterSidebarView extends ItemView {
   onOpen() {
     this.containerEl.empty();
 
+    // register ourselves with the plugin
+    this.plugin.registerSidebarInstance(this);
+
     // Build the shared structure (Active box + Vault box)
     const activeBox = this.containerEl.createDiv("z5-linter-active-box");
     const activeLabel = activeBox.createDiv("z5-linter-active-label");
@@ -29,7 +32,9 @@ export class LinterSidebarView extends ItemView {
     const activeContent = activeBox.createDiv("z5-linter-active-content");
 
     // header + lists are created by the single-file initializer
-    initActiveFileDOM(activeContent);
+    const dom = initActiveFileDOM(activeContent);
+    wireActiveFileToggles(this, dom);
+
 
     const vaultBox = this.containerEl.createDiv("z5-linter-vault-box");
     const vaultLabel = vaultBox.createDiv("z5-linter-active-label");
@@ -81,20 +86,70 @@ export class LinterSidebarView extends ItemView {
 /* Small helper to create the header + lists DOM used by the view and controllers */
 export function initActiveFileDOM(container: HTMLElement) {
   const header = container.createDiv("z5-linter-header");
+
+  const blocks: Record<string, HTMLElement> = {};
+  const sections: Record<string, HTMLElement> = {};
+
   const makeBlock = (type: "error"|"warning"|"info", iconName: string) => {
     const cls = type === "error" ? "err" : type === "warning" ? "warn" : "info";
     const block = header.createDiv("z5-linter-head-block " + cls);
     block.dataset.type = type;
     block.setAttr("role", "button");
     block.setAttr("tabindex", "0");
+
     const iconWrap = block.createSpan("z5-ls-icon");
     try { setIcon(iconWrap, iconName); } catch {}
+
     block.createSpan("z5-linter-head-count").textContent = "0";
     block.createSpan("z5-linter-head-arrow").textContent = "▶";
+
+    blocks[type] = block;
     return block;
   };
-  makeBlock("error","octagon-x"); makeBlock("warning","triangle-alert"); makeBlock("info","info");
-  container.createEl("ul", { cls: "z5-linter-results z5-linter-section-error" });
-  container.createEl("ul", { cls: "z5-linter-results z5-linter-section-warning" });
-  container.createEl("ul", { cls: "z5-linter-results z5-linter-section-info" });
+
+  makeBlock("error","octagon-x");
+  makeBlock("warning","triangle-alert");
+  makeBlock("info","info");
+
+  sections.error  = container.createEl("ul", { cls: "z5-linter-results z5-linter-section-error" });
+  sections.warning = container.createEl("ul", { cls: "z5-linter-results z5-linter-section-warning" });
+  sections.info    = container.createEl("ul", { cls: "z5-linter-results z5-linter-section-info" });
+
+  return { header, blocks, sections };
+}
+
+// helper to wire up the dropdown toggles in the active file UI section
+export function wireActiveFileToggles(view: LinterSidebarView, dom: ReturnType<typeof initActiveFileDOM>) {
+  const { blocks, sections } = dom;
+
+  const toggle = (type: "error"|"warning"|"info") => {
+    const block = blocks[type];
+    const section = sections[type];
+    const isOpen = view["openState"][type] = !view["openState"][type];
+
+    block.classList.toggle("open", isOpen);
+    block.setAttr("aria-expanded", String(isOpen));
+
+    if (isOpen) section.classList.remove("hidden");
+    else section.classList.add("hidden");
+  };
+
+  (["error","warning","info"] as const).forEach(type => {
+    const block = blocks[type];
+
+    block.addEventListener("click", () => toggle(type));
+    block.addEventListener("keydown", (ev: KeyboardEvent) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        toggle(type);
+      }
+    });
+
+    // initial state
+    if (!view["openState"][type]) {
+      sections[type].classList.add("hidden");
+    } else {
+      blocks[type].classList.add("open");
+    }
+  });
 }

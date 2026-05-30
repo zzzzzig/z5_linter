@@ -28,7 +28,10 @@ export interface LintResult {
   field?: string;
   /** optional location hint (line number) */
   line?: number;
+  /** optional file path for vault-wide reports */
+  file?: string;
 }
+
 
 type SchemaYaml = {
   meta?: Record<string, any>;
@@ -105,8 +108,86 @@ export class Z5LinterEngine {
     this.settings = plugin.settings;
   }
 
+  /**
+   * Lint a single markdown file and return results.
+   * Accepts a TFile or a path string.
+   */
+  public async runLintForFile(fileOrPath: TFile | string): Promise<LintResult[]> {
+    // Resolve TFile if a path string was provided
+    let file: TFile | null = null;
+    if (typeof fileOrPath === "string") {
+      const af = this.app.vault.getAbstractFileByPath(fileOrPath);
+      if (!af || !(af instanceof TFile)) return [];
+      file = af;
+    } else {
+      file = fileOrPath;
+    }
+
+    if (!file) return [];
+
+    // Load schema once
+    const schema = await this.loadSchemaFromSettings();
+    if (!schema) {
+      return [{
+        rule: "no-schema",
+        message: "Schema YAML could not be loaded or parsed from settings.",
+        severity: "warning",
+        file: file.path
+      }];
+    }
+
+    // Read file content
+    let content: string;
+    try {
+      content = await this.app.vault.read(file);
+    } catch (e) {
+      return [{
+        rule: "read-failed",
+        message: `Failed to read file ${file.path}.`,
+        severity: "error",
+        file: file.path
+      }];
+    }
+
+    // Extract frontmatter
+    const fmText = extractFrontmatter(content);
+    if (!fmText) {
+      return [{
+        rule: "no-frontmatter",
+        message: "No YAML frontmatter found.",
+        severity: "warning",
+        file: file.path
+      }];
+    }
+
+    const frontmatter = safeLoadYaml<Record<string, any>>(fmText);
+    if (frontmatter === null) {
+      return [{
+        rule: "frontmatter-parse-error",
+        message: "Failed to parse frontmatter YAML.",
+        severity: "error",
+        file: file.path
+      }];
+    }
+
+    // Validate and attach file path to each result
+    const results = this.validateFrontmatter(frontmatter, schema).map(r => ({ ...r, file: file.path }));
+    return results;
+  }
+
   /** Public: run lint for the currently active file and update internal results */
   async runLintForActiveFile(): Promise<LintResult[]> {
+    console.info(
+      "%c[z5Linter] runLintForActiveFile()",
+      "color: #4af; font-weight: bold;",
+      {
+        //activeLeaf: this.app.workspace.getActiveLeaf(),
+        activeView: this.app.workspace.getActiveViewOfType(MarkdownView),
+        lastActiveFile: this.lastActiveFile,
+        sticky: this.getStickyActiveFile()
+      }
+    );
+
     const activeFile = this.getActiveMarkdownFile();
     if (!activeFile) {
       this.results = [{
@@ -162,14 +243,9 @@ export class Z5LinterEngine {
       return this.results;
     }
 
+
     // run validations
     this.results = this.validateFrontmatter(frontmatter, schema);
-    // Notify plugin so it can update the status bar
-    try {
-      this.plugin.onLintResults?.(this.results);
-    } catch (e) {
-      // ignore if plugin doesn't implement it
-    }
     return this.results;
   }
 
@@ -214,20 +290,67 @@ export class Z5LinterEngine {
 
   /** Called when active leaf changes */
   async onActiveLeafChange() {
-    // If the active view is a markdown file, run lint and update sticky file.
+    // Wait 2 frames so Obsidian can finish switching views
+    await new Promise(r => setTimeout(r, 30));
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (view && view.file && view.file instanceof TFile) {
+
+    console.info(
+      "%c[z5Linter] onActiveLeafChange()",
+      "color: #4af; font-weight: bold;",
+      {
+        view,
+        file: view?.file,
+        lastActiveFile: this.lastActiveFile
+      }
+    );
+
+    if (view?.file instanceof TFile) {
       this.lastActiveFile = view.file;
       await this.runLintForActiveFile();
       return;
     }
 
-    // Active view is not a markdown file: do not clear lastActiveFile.
-    // Optionally re-run lint for the sticky file so UI remains stable.
     if (this.lastActiveFile) {
       await this.runLintForActiveFile();
     }
   }
+
+
+  /**
+   * Run lint across the vault with progress callback and cancellation support.
+   * opts.onProgress({ processed, total, currentFile })
+   * opts.signal is an AbortSignal to cancel the run.
+   */
+  public async runLintForVaultWithProgress(opts: { onProgress?: (p: { processed: number; total?: number; currentFile?: string }) => void; signal?: AbortSignal } = {}): Promise<LintResult[]> {
+    const { onProgress, signal } = opts;
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+    const files = this.app.vault.getMarkdownFiles();
+    const total = files.length;
+    const aggregated: LintResult[] = [];
+    let processed = 0;
+
+    for (const f of files) {
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      try {
+        const fileResults = await this.runLintForFile(f);
+        if (Array.isArray(fileResults) && fileResults.length) aggregated.push(...fileResults);
+      } catch (e) {
+        // If a single file fails, record an error result but continue
+        aggregated.push({
+          rule: "file-lint-failed",
+          message: `Lint failed for ${f.path}: ${String(e)}`,
+          severity: "error",
+          file: f.path
+        });
+      }
+      processed++;
+      try { onProgress?.({ processed, total, currentFile: f.path }); } catch (e) { /* ignore progress errors */ }
+    }
+
+    return aggregated;
+  }
+
 
 
   /** Load schema YAML from the configured file + heading in plugin settings */
@@ -413,17 +536,27 @@ export class Z5LinterEngine {
 
   /** Helper: return the active markdown file if valid; otherwise return the sticky lastActiveFile */
   private getActiveMarkdownFile(): TFile | null {
-    // Try to get the currently active markdown view
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (view && view.file && view.file instanceof TFile) {
-      // Update sticky file to the newly active valid file
+
+    console.info(
+      "%c[z5Linter] getActiveMarkdownFile()",
+      "color: #4af; font-weight: bold;",
+      {
+        view,
+        viewFile: view?.file,
+        lastActiveFile: this.lastActiveFile
+      }
+    );
+
+    if (view?.file instanceof TFile) {
       this.lastActiveFile = view.file;
       return view.file;
     }
 
-    // If active view is not a markdown file (sidebar, empty, etc.), return the last remembered file
     return this.lastActiveFile;
   }
+
+
 
   /** Normalize severity value from schema definition; default fallback if missing/invalid */
   private resolveSeverity(def: any, fallback: "error" | "warning" | "info" = "warning"): "error" | "warning" | "info" {
