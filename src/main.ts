@@ -233,7 +233,7 @@ export default class z5Linter extends Plugin {
     }
   }
 
-
+  
 
 
   // called by the sidebar on creation. used to register the sidebar here, in the plugin. 
