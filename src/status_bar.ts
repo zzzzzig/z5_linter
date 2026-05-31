@@ -7,8 +7,11 @@ import type z5Linter from "./main";
  */
 
 let statusEl: HTMLElement | null = null;
+let pluginRef: z5Linter | null = null;
 
 export function createStatusBar(plugin: z5Linter) {
+  pluginRef = plugin;
+  plugin.registerStatusBarInstance?.(statusEl);
   if (statusEl) return statusEl;
   const el = plugin.addStatusBarItem();
   el.addClass("z5-linter-status");
@@ -26,19 +29,19 @@ export function createStatusBar(plugin: z5Linter) {
   el.appendChild(makeBlock("warn","triangle-alert"));
   el.appendChild(makeBlock("info","info"));
   el.onclick = () => {
-    // Prefer the old name if present, otherwise call the new one.
+    if (!pluginRef) return;
+
     try {
-      if (typeof (plugin as any).openLinterSidebar === "function") {
-        (plugin as any).openLinterSidebar();
-      } else if (typeof (plugin as any).openSchemaSidebar === "function") {
-        (plugin as any).openSchemaSidebar();
-      } else {
-        console.warn("z5Linter: no sidebar open method available");
+      if (typeof (pluginRef as any).openLinterSidebar === "function") {
+        (pluginRef as any).openLinterSidebar();
+      } else if (typeof (pluginRef as any).openSchemaSidebar === "function") {
+        (pluginRef as any).openSchemaSidebar();
       }
     } catch (e) {
       console.warn("z5Linter: status bar click handler failed", e);
     }
   };
+
   el.title = "Click to open z5 Linter";
   statusEl = el;
   return el;

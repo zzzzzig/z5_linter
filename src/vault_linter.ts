@@ -16,38 +16,25 @@ export class VaultLinter {
   // Run the engine across the vault and return results (does not save)
   public async runVaultLint(options: RunOptions = {}): Promise<LintResult[]> {
     const { onProgress, signal } = options;
-    // Prefer engine-provided bulk runner if available
-    const engine: any = this.plugin.linter;
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
-    // If engine exposes a streaming API with progress, use it
-    if (typeof engine.runLintForVaultWithProgress === "function") {
-      return await engine.runLintForVaultWithProgress({ onProgress, signal });
-    }
-
-    // Fallback: iterate markdown files and call per-file lint
     const files = this.plugin.app.vault.getMarkdownFiles();
+    const total = files.length;
     const results: LintResult[] = [];
+
     let processed = 0;
     for (const f of files) {
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      // call engine per-file lint method if available
-      if (typeof engine.runLintForFile === "function") {
-        const r = await engine.runLintForFile(f);
-        if (Array.isArray(r)) results.push(...r);
-      } else if (typeof engine.lintFile === "function") {
-        const r = await engine.lintFile(f.path);
-        if (Array.isArray(r)) results.push(...r);
-      } else {
-        // last resort: call runLintForActiveFile for each file by opening it (slow)
-        // skip this fallback unless you want it; here we throw to avoid silent slowness
-        throw new Error("Engine does not expose a per-file lint API");
-      }
+
+      const r = await this.plugin.linter.lintFile(f);
+      if (Array.isArray(r)) results.push(...r);
+
       processed++;
-      onProgress?.({ processed, total: files.length, currentFile: f.path });
+      onProgress?.({ processed, total, currentFile: f.path });
     }
+
     return results;
   }
+
 
   // Run and save to a timestamped file in reports folder
   public async runVaultLintAndSave(options: RunOptions = {}): Promise<{ path: string; results: LintResult[] }> {

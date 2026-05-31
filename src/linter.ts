@@ -112,8 +112,8 @@ export class Z5LinterEngine {
    * Lint a single markdown file and return results.
    * Accepts a TFile or a path string.
    */
-  public async runLintForFile(fileOrPath: TFile | string): Promise<LintResult[]> {
-    // Resolve TFile if a path string was provided
+  public async lintFile(fileOrPath: TFile | string): Promise<LintResult[]> {
+    // Resolve file
     let file: TFile | null = null;
     if (typeof fileOrPath === "string") {
       const af = this.app.vault.getAbstractFileByPath(fileOrPath);
@@ -125,7 +125,7 @@ export class Z5LinterEngine {
 
     if (!file) return [];
 
-    // Load schema once
+    // Load schema
     const schema = await this.loadSchemaFromSettings();
     if (!schema) {
       return [{
@@ -136,11 +136,11 @@ export class Z5LinterEngine {
       }];
     }
 
-    // Read file content
+    // Read file
     let content: string;
     try {
       content = await this.app.vault.read(file);
-    } catch (e) {
+    } catch {
       return [{
         rule: "read-failed",
         message: `Failed to read file ${file.path}.`,
@@ -155,7 +155,7 @@ export class Z5LinterEngine {
       return [{
         rule: "no-frontmatter",
         message: "No YAML frontmatter found.",
-        severity: "warning",
+        severity: "error",
         file: file.path
       }];
     }
@@ -170,84 +170,28 @@ export class Z5LinterEngine {
       }];
     }
 
-    // Validate and attach file path to each result
-    const results = this.validateFrontmatter(frontmatter, schema).map(r => ({ ...r, file: file.path }));
-    return results;
+    // Validate
+    return this.validateFrontmatter(frontmatter, schema)
+      .map(r => ({ ...r, file: file.path }));
   }
 
-  /** Public: run lint for the currently active file and update internal results */
-  async runLintForActiveFile(): Promise<LintResult[]> {
-    console.info(
-      "%c[z5Linter] runLintForActiveFile()",
-      "color: #4af; font-weight: bold;",
-      {
-        //activeLeaf: this.app.workspace.getActiveLeaf(),
-        activeView: this.app.workspace.getActiveViewOfType(MarkdownView),
-        lastActiveFile: this.lastActiveFile,
-        sticky: this.getStickyActiveFile()
-      }
-    );
 
-    const activeFile = this.getActiveMarkdownFile();
-    if (!activeFile) {
-      this.results = [{
+  /** Public: run lint for the currently active file and update internal results */
+  public async runLintForActiveFile(): Promise<LintResult[]> {
+    const file = this.getActiveMarkdownFile();
+    if (!file) {
+      return [{
         rule: "no-active-file",
         message: "No active markdown file to lint.",
         severity: "info"
       }];
-      return this.results;
     }
 
-    // ensure schema loaded
-    const schema = await this.loadSchemaFromSettings();
-    if (!schema) {
-      this.results = [{
-        rule: "no-schema",
-        message: "Schema YAML could not be loaded or parsed from settings.",
-        severity: "warning"
-      }];
-      return this.results;
-    }
-
-    // read file content
-    let content: string;
-    try {
-      content = await this.app.vault.read(activeFile);
-    } catch (e) {
-      this.results = [{
-        rule: "read-failed",
-        message: `Failed to read file ${activeFile.path}.`,
-        severity: "error"
-      }];
-      return this.results;
-    }
-
-    // extract frontmatter
-    const fmText = extractFrontmatter(content);
-    if (!fmText) {
-      this.results = [{
-        rule: "no-frontmatter",
-        message: "No YAML frontmatter found in the active file.",
-        severity: "warning"
-      }];
-      return this.results;
-    }
-
-    const frontmatter = safeLoadYaml<Record<string, any>>(fmText);
-    if (frontmatter === null) {
-      this.results = [{
-        rule: "frontmatter-parse-error",
-        message: "Failed to parse frontmatter YAML.",
-        severity: "error"
-      }];
-      return this.results;
-    }
-
-
-    // run validations
-    this.results = this.validateFrontmatter(frontmatter, schema);
-    return this.results;
+    const results = await this.lintFile(file);
+    this.results = results;
+    return results;
   }
+
 
   /** Render the latest results into a container element (clears container) */
   renderLintResults(container: HTMLElement) {
@@ -602,6 +546,7 @@ function extractSectionUnderHeading(md: string, headingText: string): string | n
   return outLines.join("\n").trim();
 }
 
+
 /** Extract fenced YAML block (```yaml ... ```) */
 function extractFencedYaml(section: string): string | null {
   const fencedRegex = /```(?:yaml|yml)\s*([\s\S]*?)```/i;
@@ -609,7 +554,6 @@ function extractFencedYaml(section: string): string | null {
   if (m && m[1]) return m[1].trim();
   return null;
 }
-
 
 
 // Helper: return true if value is a valid Date or a string that parses to a valid Date

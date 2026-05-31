@@ -4,7 +4,9 @@ import { Z5LinterEngine, LintResult } from "./linter";
 import { LinterSidebarView } from "./sidebar";
 import { refreshActiveFileFromEngine } from "./sidebar_single_file";
 import { initVaultUI } from "./sidebar_vault";
-import { createStatusBar as createStatusBarUI, updateStatusBarCounts as updateStatusBarUI, removeStatusBar as removeStatusBarUI } from "./status_bar";
+//import { createStatusBar as createStatusBarUI, updateStatusBarCounts as updateStatusBarUI, removeStatusBar as removeStatusBarUI } from "./status_bar";
+import { createStatusBar, updateStatusBarCounts, removeStatusBar } from "./status_bar";
+
 
 const VIEW_TYPE_LINTER = "z5-linter-view";
 
@@ -24,6 +26,9 @@ export default class z5Linter extends Plugin {
   // the sidebar instance. it registers itself by calling plugin.registerSidebarInstance().
   private sidebarInstance: LinterSidebarView | null = null;
 
+  // the status bar instance. it registers itself by calling plugin.registerStatusBarInstance()
+  private statusBarInstance: HTMLElement | null = null;
+
   // a blank table in which we store whatever linting results occurred most recently
   // concern: are we sharing single-file and full-vault results here?
   // will single-file results during a full-vault lint cause issues?
@@ -36,10 +41,6 @@ export default class z5Linter extends Plugin {
   // TODO: rename this to something less shit
   // TODO: shouldn't this live in sidebar.ts?
   private _canonicalSchemaLeaf: WorkspaceLeaf | null = null;
-
-  // The HTML element we use for our status bar
-  // TODO: shouldn't this live in status_bar.ts?
-  private statusBarEl: HTMLElement | null = null;
 
   async onload() {
     // loads our settings data, required for 
@@ -76,7 +77,8 @@ export default class z5Linter extends Plugin {
     this.addSettingTab(this.settingsTabInstance);
 
     // Status bar
-    if (this.settings.show_status_bar) this.createStatusBar();
+    if (this.settings.show_status_bar) createStatusBar(this);
+
 
     // Vault events
     this.registerEvent(this.app.vault.on("modify", (file) => this.onVaultFileChanged(file.path)));
@@ -98,13 +100,12 @@ export default class z5Linter extends Plugin {
     this.registerEvent(this.app.workspace.on("active-leaf-change", async () => {
       //await this.linter.onActiveLeafChange();
       // lightweight update of sidebar active-file UI
-      await this.updateSidebarForActiveFile();
+      await this.runActiveFileLint();
     }));
 
     // Run initial lint for active file (engine may cache results)
     try {
-      const initial = await this.linter.runLintForActiveFile();
-      this.onLintResults(initial || []);
+      await this.runActiveFileLint();
     } catch (e) {
       console.warn("z5Linter: initial lint failed", e);
     }
@@ -112,8 +113,9 @@ export default class z5Linter extends Plugin {
 
   onunload() {
     // cleanup UI pieces
-    this.removeStatusBar();
+    removeStatusBar();
   }
+
 
   // load settings from obsidian
   async loadSettings() {
@@ -141,7 +143,7 @@ export default class z5Linter extends Plugin {
     if (this.refreshTimer) window.clearTimeout(this.refreshTimer);
     this.refreshTimer = window.setTimeout(async () => {
       this.refreshTimer = null;
-      await this.updateSidebarForActiveFile();
+      await this.runActiveFileLint();
     }, delay);
   }
 
@@ -177,7 +179,7 @@ export default class z5Linter extends Plugin {
         }, 40);
 
         // lightweight update
-        await this.updateSidebarForActiveFile();
+        await this.runActiveFileLint();
         return canonical;
       }
 
@@ -192,7 +194,7 @@ export default class z5Linter extends Plugin {
       this._canonicalSchemaLeaf = canonical;
       this.app.workspace.revealLeaf(canonical);
       // lightweight update
-      await this.updateSidebarForActiveFile();
+      await this.runActiveFileLint();
       return canonical;
     } catch (err) {
       console.error("z5Linter: openSchemaSidebar failed:", err);
@@ -201,57 +203,38 @@ export default class z5Linter extends Plugin {
     }
   }
 
-  // Lightweight updater: refresh active-file results into any open sidebar view
-  public async updateSidebarForActiveFile(): Promise<void> {
+  public async runActiveFileLint(): Promise<void> {
     try {
+      // lints the active file
       const results = await this.linter.runLintForActiveFile();
       this.latestLintResults = results;
 
+      // update the status bar with our results
+      if (this.settings.show_status_bar) {
+        updateStatusBarCounts(results);
+      }
+
+      // update the sidebar with our results
       if (this.sidebarInstance) {
           this.sidebarInstance.updateHeaderCounts(results);
           this.sidebarInstance.renderResults(results);
       }
 
     } catch (err) {
-      console.warn("z5Linter: updateSidebarForActiveFile failed", err);
+      console.warn("z5Linter: runActiveFileLint failed", err);
     }
   }
+
+
+
 
   // called by the sidebar on creation. used to register the sidebar here, in the plugin. 
   public registerSidebarInstance(view: LinterSidebarView) {
     this.sidebarInstance = view;
   }
 
-  // Status bar helpers (thin wrappers to the status_bar module)
-  public createStatusBar() {
-    const el = createStatusBarUI(this);
-    this.statusBarEl = el;
-  }
-
-  public removeStatusBar() {
-    removeStatusBarUI();
-    this.statusBarEl = null;
-  }
-  
-  public updateStatusBarCounts(results: LintResult[]) {
-    updateStatusBarUI(results);
-  }
-
-  // Called by engine when new lint results are available
-  public onLintResults(results: LintResult[]) {
-    // store canonical results
-    this.latestLintResults = results || [];
-    // update status bar
-    if (this.settings.show_status_bar) this.updateStatusBarCounts(results);
-    // update sidebar if open
-    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_LINTER);
-    if (leaves.length > 0) {
-      const view = leaves[0].view as any;
-      if (view && typeof view.updateHeaderCounts === "function" && typeof view.renderResults === "function") {
-        view.updateHeaderCounts(results);
-        view.renderResults(results);
-      }
-    }
+  public registerStatusBarInstance(el: HTMLElement) {
+    this.statusBarInstance = el;
   }
 
   // Run vault lint and save report (uses engine if available)
