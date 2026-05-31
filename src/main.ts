@@ -7,6 +7,8 @@ import { initVaultUI } from "./sidebar_vault";
 //import { createStatusBar as createStatusBarUI, updateStatusBarCounts as updateStatusBarUI, removeStatusBar as removeStatusBarUI } from "./status_bar";
 import { createStatusBar, updateStatusBarCounts, removeStatusBar } from "./status_bar";
 import { VaultLinter } from "./vault_linter";
+// test for canvas creation and migration
+import { registerCanvasCommand } from "./canvas_wrapper";
 
 
 const VIEW_TYPE_LINTER = "z5-linter-view";
@@ -50,6 +52,10 @@ export default class z5Linter extends Plugin {
   async onload() {
     // loads our settings data, required for 
     await this.loadSettings();
+
+
+    registerCanvasCommand(this.app, this);
+
 
     // instantiate linter engine (it reads plugin.settings internally)
     this.linter = new Z5LinterEngine(this);
@@ -233,7 +239,7 @@ export default class z5Linter extends Plugin {
     }
   }
 
-  
+
 
 
   // called by the sidebar on creation. used to register the sidebar here, in the plugin. 
