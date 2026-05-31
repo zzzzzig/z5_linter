@@ -98,7 +98,7 @@
 }
 .z5-linter-head-block.err:hover  { color: var(--text-error); }
 .z5-linter-head-block.warn:hover { color: var(--text-warning); }
-.z5-linter-head-block.info:hover { color: var(--text-accent); }
+.z5-linter-head-block.info:hover { color: var(--text-normal); }
 
 /* Active file boxed panel */
 .z5-linter-active-box {
@@ -125,14 +125,7 @@
 .z5-linter-active-content .z5-linter-results { margin: 0; padding: 0; list-style: none; }
 .z5-linter-active-content .z5-linter-results li { padding: 8px 10px; margin: 6px 0; border-radius: var(--radius-s); }
 
-/* Vault box */
-.z5-linter-vault-box {
-  margin: 8px;
-  padding: 8px;
-  border-radius: var(--radius-s);
-  background: var(--background-primary);
-  border: 1px solid var(--background-modifier-border);
-}
+
 
 /* Status bar container */
 .z5-linter-status {
@@ -243,3 +236,457 @@
 .z5-reports-valid { color: var(--interactive-accent); }   /* green / accent for valid */
 .z5-reports-invalid { color: var(--text-error); }         /* red for invalid */
 
+
+
+
+
+
+
+/* Vault combined list: make card entries match single-file list spacing and hover */
+.z5-vault-combined-file-list {
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Make each card look and behave like the old li items */
+.z5-vault-combined-file-list .z5-vault-file-card {
+  padding: 8px 10px;
+  margin: 6px 0;
+  border-radius: var(--radius-s);
+  transition: background-color 0.15s ease;
+  cursor: pointer;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* Hover illumination same as single-file list */
+.z5-vault-combined-file-list .z5-vault-file-card:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+/* Preserve the severity background/border rules already defined for .z5-linter-error/.z5-linter-warning/.z5-linter-info */
+/* (they will apply to the card because the card includes those classes) */
+
+/* Ensure left column uses same spacing as single-file */
+.z5-vault-file-left, .z5-linter-file-left {
+  display: block;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* Make the filename link look like the single-file path text */
+.z5-linter-file-path,
+.z5-vault-file-card .z5-linter-file-path {
+  color: inherit;
+  text-decoration: none;
+  font-weight: 600;
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Hover underline for the filename only (keeps card hover separate) */
+.z5-linter-file-path:hover {
+  text-decoration: underline;
+}
+
+/* Right column: align chips + open icon to the top-right */
+.z5-linter-file-right,
+.z5-vault-file-right {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* Chips: keep them compact and vertically aligned */
+.z5-vault-file-chips,
+.z5-vault-file-chips .z5-count-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Make the open button visually compact like other small controls */
+.z5-vault-file-open {
+  background: transparent;
+  border: none;
+  padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: inherit;
+}
+
+/* Prevent focus outline from shifting layout but keep keyboard visibility */
+.z5-vault-file-open:focus,
+.z5-vault-file-card:focus-within {
+  outline: 2px solid var(--background-modifier-border);
+  outline-offset: 0;
+}
+
+
+
+
+
+
+
+
+
+/* ==========================================================================
+   Vault card styles — full replacement
+   - Scoped under .z5-linter-vault-box for high specificity
+   - Cards match single-file spacing, hover, and severity backgrounds
+   - Chips show icon + count, muted by default, tint on hover/focus
+   - Filename link shows basename (no .md) and full path in title
+   ========================================================================== */
+
+/* Container for combined cards (acts like a list) */
+.z5-linter-vault-box .z5-vault-combined-file-list {
+  display: block;
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Vault box */
+.z5-linter-vault-box {
+  margin: 8px;
+  padding: 8px;
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+}
+
+/* Card: visual parity with .z5-linter-results li from single-file panel */
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-vault-file-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  margin: 6px 0;
+  border-radius: var(--radius-s);
+  transition: background-color 0.15s ease, color 0.15s ease;
+  cursor: pointer;
+  color: inherit;
+  /* allow severity background classes (z5-linter-error/warning/info) to apply */
+}
+
+/* Hover illumination identical to single-file list */
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-vault-file-card:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+/* Focus-visible for keyboard users (keeps layout stable) */
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-vault-file-card:focus-within,
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-vault-file-card:focus {
+  outline: 2px solid var(--background-modifier-border);
+  outline-offset: 0;
+}
+
+/* Left column uses same single-file class names for exact spacing */
+.z5-linter-vault-box .z5-vault-file-card .z5-linter-file-left {
+  flex: 1 1 auto;
+  min-width: 0; /* allow truncation */
+  display: block;
+}
+
+/* Filename link: bold, single-line, ellipsis, full path in title */
+.z5-linter-vault-box .z5-vault-file-card .z5-linter-file-path {
+  display: inline-block;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Subtle underline on hover for the filename only */
+.z5-linter-vault-box .z5-vault-file-card .z5-linter-file-path:hover {
+  text-decoration: underline;
+}
+
+/* Right column: chips + open button aligned top-right */
+.z5-linter-vault-box .z5-vault-file-card .z5-linter-file-right {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* Chips container (keeps chips compact) */
+.z5-linter-vault-box .z5-vault-file-card .z5-vault-file-chips {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Chip base (icon + count) — reuse z5-ls semantics for tinting */
+.z5-linter-vault-box .z5-vault-file-card .z5-ls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border-radius: var(--radius-s);
+  cursor: default; /* non-clickable chips */
+  transition: color 0.15s ease, opacity 0.15s ease;
+  color: var(--text-muted); /* muted by default */
+  opacity: 0.95;
+  font-family: var(--font-monospace);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Count inside chip */
+.z5-linter-vault-box .z5-vault-file-card .z5-ls .z5-ls-count {
+  min-width: 1ch;
+  max-width: 3ch;
+  text-align: right;
+  line-height: 1;
+  color: inherit;
+}
+
+/* Icon wrapper inside chip */
+.z5-linter-vault-box .z5-vault-file-card .z5-ls .z5-ls-icon {
+  width: var(--icon-size-s, 14px);
+  height: var(--icon-size-s, 14px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  line-height: 0;
+}
+
+/* Ensure SVGs follow currentColor */
+.z5-linter-vault-box .z5-vault-file-card .z5-ls .z5-ls-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+}
+
+/* Open button: compact, visually consistent with other small controls */
+.z5-linter-vault-box .z5-vault-file-card .z5-vault-file-open {
+  background: transparent;
+  border: none;
+  padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: inherit;
+}
+
+/* Tooltip styling is native (title attribute). If you later add custom tooltips,
+   target .z5-vault-file-card .z5-ls[title] */
+
+/* Hover / focus tinting: colorize chips when card is hovered or focused */
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-vault-file-card:hover .z5-ls.err,
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-vault-file-card:focus-within .z5-ls.err {
+  color: var(--text-error);
+}
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-vault-file-card:hover .z5-ls.warn,
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-vault-file-card:focus-within .z5-ls.warn {
+  color: var(--text-warning);
+}
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-vault-file-card:hover .z5-ls.info,
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-vault-file-card:focus-within .z5-ls.info {
+  color: var(--text-normal);
+}
+
+/* Small accessibility nicety: make the filename link keyboard-focusable and visible */
+.z5-linter-vault-box .z5-vault-file-card .z5-linter-file-path:focus {
+  outline: 2px solid var(--background-modifier-border);
+  outline-offset: 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* ===== Authoritative vault card rules (paste once at end of styles.css) ===== */
+
+/* Scope under the vault box so these rules override earlier generic ones */
+.z5-linter-vault-box .z5-vault-combined-file-list {
+  display: block;
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Card visual parity with single-file list items */
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-vault-file-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  margin: 6px 0;
+  border-radius: var(--radius-s);
+  transition: background-color 0.15s ease, color 0.15s ease;
+  cursor: pointer;
+  color: inherit;
+}
+
+/* Hover illumination */
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-vault-file-card:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+/* Left column spacing and truncation */
+.z5-linter-vault-box .z5-vault-file-card .z5-linter-file-left {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: block;
+}
+
+/* Filename link styling */
+.z5-linter-vault-box .z5-vault-file-card .z5-linter-file-path {
+  display: inline-block;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.z5-linter-vault-box .z5-vault-file-card .z5-linter-file-path:hover {
+  text-decoration: underline;
+}
+
+/* Right column alignment */
+.z5-linter-vault-box .z5-vault-file-card .z5-linter-file-right {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* Chips container */
+.z5-linter-vault-box .z5-vault-file-card .z5-vault-file-chips {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Chip base: muted by default, compact */
+.z5-linter-vault-box .z5-vault-file-card .z5-ls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border-radius: var(--radius-s);
+  cursor: default;
+  transition: color 0.15s ease, opacity 0.15s ease;
+  color: var(--text-muted); /* muted by default */
+  opacity: 0.95;
+  font-family: var(--font-monospace);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Count and icon inherit chip color */
+.z5-linter-vault-box .z5-vault-file-card .z5-ls .z5-ls-count,
+.z5-linter-vault-box .z5-vault-file-card .z5-ls .z5-ls-icon {
+  color: inherit;
+}
+
+/* Icon sizing and SVG stroke follow currentColor */
+.z5-linter-vault-box .z5-vault-file-card .z5-ls .z5-ls-icon {
+  width: var(--icon-size-s, 14px);
+  height: var(--icon-size-s, 14px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+.z5-linter-vault-box .z5-vault-file-card .z5-ls .z5-ls-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+}
+
+/* Open button compact */
+.z5-linter-vault-box .z5-vault-file-card .z5-vault-file-open {
+  background: transparent;
+  border: none;
+  padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: inherit;
+}
+
+/* Hover/focus tinting (must come after muted defaults) */
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-vault-file-card:hover .z5-ls.err,
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-vault-file-card:focus-within .z5-ls.err {
+  color: var(--text-error);
+}
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-vault-file-card:hover .z5-ls.warn,
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-vault-file-card:focus-within .z5-ls.warn {
+  color: var(--text-warning);
+}
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-vault-file-card:hover .z5-ls.info,
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-vault-file-card:focus-within .z5-ls.info {
+  color: var(--text-normal);
+}
+
+/* Chip-level hover tinting */
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-ls:hover.err { color: var(--text-error); }
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-ls:hover.warn { color: var(--text-warning); }
+.z5-linter-vault-box .z5-vault-combined-file-list .z5-ls:hover.info { color: var(--text-normal); }
+
+/* Accessibility: visible focus for filename link */
+.z5-linter-vault-box .z5-vault-file-card .z5-linter-file-path:focus {
+  outline: 2px solid var(--background-modifier-border);
+  outline-offset: 0;
+}
+
+
+
+.z5-linter-vault-box .z5-vault-file-card .z5-linter-file-path {
+  opacity: 0.95;
+  transition: opacity 0.12s ease;
+}
+.z5-linter-vault-box .z5-vault-file-card:hover .z5-linter-file-path {
+  opacity: 1;
+}

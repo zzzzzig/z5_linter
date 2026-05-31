@@ -238,16 +238,6 @@ export class Z5LinterEngine {
     await new Promise(r => setTimeout(r, 30));
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 
-    console.info(
-      "%c[z5Linter] onActiveLeafChange()",
-      "color: #4af; font-weight: bold;",
-      {
-        view,
-        file: view?.file,
-        lastActiveFile: this.lastActiveFile
-      }
-    );
-
     if (view?.file instanceof TFile) {
       this.lastActiveFile = view.file;
       await this.runLintForActiveFile();
@@ -481,16 +471,6 @@ export class Z5LinterEngine {
   /** Helper: return the active markdown file if valid; otherwise return the sticky lastActiveFile */
   private getActiveMarkdownFile(): TFile | null {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-
-    console.info(
-      "%c[z5Linter] getActiveMarkdownFile()",
-      "color: #4af; font-weight: bold;",
-      {
-        view,
-        viewFile: view?.file,
-        lastActiveFile: this.lastActiveFile
-      }
-    );
 
     if (view?.file instanceof TFile) {
       this.lastActiveFile = view.file;

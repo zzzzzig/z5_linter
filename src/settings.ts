@@ -6,6 +6,7 @@ export interface z5LinterSettings {
   schema_heading: string;
   show_status_bar: boolean;
   reportsFolder: string;
+  keepReports: number; // default 5
 }
 
 export const DEFAULT_SETTINGS: z5LinterSettings = {
@@ -13,6 +14,7 @@ export const DEFAULT_SETTINGS: z5LinterSettings = {
   schema_heading: '',
   show_status_bar: false,
   reportsFolder: '',
+  keepReports: 5,
 };
 
 import { App, PluginSettingTab, Setting, TFile, FuzzySuggestModal, Notice, DropdownComponent } from "obsidian";
@@ -133,7 +135,7 @@ export class z5LinterSettingsTab extends PluginSettingTab {
             validateAndUpdateIcon(this.plugin.settings.reportsFolder);
           });
 
-        
+
 
         // Access the raw input element
         const inputEl = (text as any).inputEl as HTMLInputElement;
@@ -192,6 +194,26 @@ export class z5LinterSettingsTab extends PluginSettingTab {
         inputEl.addEventListener("input", () => validateAndUpdateIcon(inputEl.value));
         inputEl.addEventListener("blur", () => validateAndUpdateIcon(inputEl.value));
       });
+
+
+    // setting to set how many vault lint reports to keep
+    new Setting(containerEl)
+      .setName("Number of vault lint reports to keep")
+      .setDesc("Older reports will be automatically deleted.")
+      .addText(text => {
+        text.inputEl.type = "number";
+        text.inputEl.min = "1";
+        text.inputEl.max = "50";
+        text.setValue(String(this.plugin.settings.keepReports));
+        text.onChange(async (value) => {
+          const num = parseInt(value, 10);
+          if (!isNaN(num) && num >= 1 && num <= 50) {
+            this.plugin.settings.keepReports = num;
+            await this.plugin.saveSettings();
+          }
+        });
+      });
+
 
 
 

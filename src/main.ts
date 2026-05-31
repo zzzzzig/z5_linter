@@ -6,6 +6,7 @@ import { refreshActiveFileFromEngine } from "./sidebar_single_file";
 import { initVaultUI } from "./sidebar_vault";
 //import { createStatusBar as createStatusBarUI, updateStatusBarCounts as updateStatusBarUI, removeStatusBar as removeStatusBarUI } from "./status_bar";
 import { createStatusBar, updateStatusBarCounts, removeStatusBar } from "./status_bar";
+import { VaultLinter } from "./vault_linter";
 
 
 const VIEW_TYPE_LINTER = "z5-linter-view";
@@ -28,6 +29,10 @@ export default class z5Linter extends Plugin {
 
   // the status bar instance. it registers itself by calling plugin.registerStatusBarInstance()
   private statusBarInstance: HTMLElement | null = null;
+
+
+  // Vault Linter, the linter wrapper that handles the whole vault
+  public vaultLinter: VaultLinter | null = null;
 
   // a blank table in which we store whatever linting results occurred most recently
   // concern: are we sharing single-file and full-vault results here?
@@ -62,7 +67,7 @@ export default class z5Linter extends Plugin {
     this.addCommand({
       id: "z5-run-vault-lint-and-save",
       name: "Run vault lint and save report",
-      callback: async () => { await this.runVaultLintAndSave(); }
+      callback: async () => { await this.vaultLinter.runVaultLintAndSave(); }
     });
 
     // Ribbon button
@@ -79,6 +84,9 @@ export default class z5Linter extends Plugin {
     // Status bar
     if (this.settings.show_status_bar) createStatusBar(this);
 
+
+    // Vault Linter
+    this.vaultLinter = new VaultLinter(this);
 
     // Vault events
     this.registerEvent(this.app.vault.on("modify", (file) => this.onVaultFileChanged(file.path)));
@@ -237,71 +245,4 @@ export default class z5Linter extends Plugin {
     this.statusBarInstance = el;
   }
 
-  // Run vault lint and save report (uses engine if available)
-  public async runVaultLintAndSave(): Promise<void> {
-    const reportPath = this.buildReportFilename();
-    try {
-      await this.ensureReportsFolderExists();
-
-      const results = typeof (this.linter as any).runLintForVault === "function"
-        ? await (this.linter as any).runLintForVault()
-        : (await (this.linter as any).runLintForActiveFile()) || [];
-
-      const content = JSON.stringify({
-        generatedAt: new Date().toISOString(),
-        pluginVersion: this.manifest.version,
-        results
-      }, null, 2);
-
-      await this.app.vault.create(reportPath, content);
-      new Notice(`Linter report saved: ${reportPath}`);
-    } catch (err) {
-      console.error("Failed to run vault lint or save report", err);
-      new Notice("Failed to save linter report: " + String(err));
-    }
-  }
-
-  // Read the most recent report from the reports folder
-  public async getLatestReport(): Promise<{ path: string, content: any } | null> {
-    const folder = this.settings.reportsFolder?.trim() || "reports/linter";
-    const files = this.app.vault.getFiles().filter(f => f.path.startsWith(folder + "/"));
-    if (!files.length) return null;
-    files.sort((a, b) => {
-      const am = (a.stat && (a.stat.mtime || 0)) || 0;
-      const bm = (b.stat && (b.stat.mtime || 0)) || 0;
-      return bm - am;
-    });
-    const latest = files[0];
-    try {
-      const raw = await this.app.vault.read(latest);
-      const parsed = JSON.parse(raw);
-      return { path: latest.path, content: parsed };
-    } catch (e) {
-      console.error("Failed to read/parse latest report", e);
-      return null;
-    }
-  }
-
-  // Ensure the reports folder exists (creates intermediate folders as needed)
-  public async ensureReportsFolderExists(): Promise<void> {
-    const folder = this.settings.reportsFolder?.trim() || "reports/linter";
-    const parts = folder.split("/").filter(Boolean);
-    let pathSoFar = "";
-    for (const part of parts) {
-      pathSoFar = pathSoFar ? `${pathSoFar}/${part}` : part;
-      const af = this.app.vault.getAbstractFileByPath(pathSoFar);
-      if (!af) {
-        await this.app.vault.createFolder(pathSoFar);
-      }
-    }
-  }
-
-  // Build a timestamped filename for reports
-  private buildReportFilename(): string {
-    const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const ts = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-    const folder = this.settings.reportsFolder?.trim() || "reports/linter";
-    return `${folder}/linter-report-${ts}.json`;
-  }
 }
