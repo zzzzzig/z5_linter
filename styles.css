@@ -690,3 +690,52 @@
 .z5-linter-vault-box .z5-vault-file-card:hover .z5-linter-file-path {
   opacity: 1;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* z5Linter toolbar (shared styles.css) */
+/*
+.z5-toolbar {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px;
+  border-radius: 8px;
+  background: var(--background-modifier-card);
+  box-shadow: 0 1px 0 rgba(0,0,0,0.04);
+}
+.z5-toolbar button {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #1e90ff; // BLUE
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+.z5-toolbar button:hover { filter: brightness(0.95); }
+.z5-toolbar .z5-btn-secondary {
+  background: transparent;
+  color: var(--text-normal);
+  border: 1px solid rgba(0,0,0,0.06);
+}
+.z5-toolbar--debug {
+  outline: 2px dashed rgba(30,144,255,0.9);
+  outline-offset: 6px;
+}
+
+/*

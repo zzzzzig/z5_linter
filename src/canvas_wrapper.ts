@@ -1,20 +1,28 @@
 import { App, Notice, Plugin } from "obsidian";
 import { v4 as uuidv4 } from "uuid";
+import { ensureInvokerRegistered } from "./invoker";
 
 
 
 
 // Visual/layout constants
-export const GROUP_MARGIN_PX = 10;        // margin around groups (pixels)
+export const GROUP_MARGIN_PX = 20;        // margin around groups (pixels)
 export const GROUP_CARD_Y_GAP = 0;       // default vertical gap between cards inside a group
 export const FRONTMATTER_NODE_HEIGHT = 60;   // height of the frontmatter node (px)
 export const AREA_NODE_HEIGHT = 60;         // height of each area card node (px)
 export const EMBED_NODE_HEIGHT = 1200;        // minimum height of the embedded-template node (px)
 export const MAJOR_VERTICAL_SPACING = 40;          // vertical spacing between stacked items (px)
 export const CONTROL_NODE_HEIGHT = 80; // height of the control node (px)
+export const HEADING_NODE_HEIGHT = 100; // height of the control node (px)
 
 // Horizontal spacing to place a new template group to the right of the highest-version group
 export const TEMPLATE_GROUP_HORIZONTAL_OFFSET = 480;
+
+
+export const DEFAULT_NODE_STYLE: Record<string, any> = {
+  textAlign: "center",
+};
+
 
 
 // Callout style tokens used when rendering callout blocks inside text nodes.
@@ -23,7 +31,7 @@ export const FRONTMATTER_CALLOUT_TYPE = "warning";
 export const AREA_CALLOUT_TYPE = "info";
 
 // Explicit width for area nodes (so group width is predictable)
-export const AREA_NODE_WIDTH = 360;
+export const TEMPLATE_STACK_WIDTH = 360;
 
 // Grid / cell size (single canonical value used everywhere)
 export const CELL_SIZE = 20;
@@ -82,6 +90,7 @@ export function registerCanvasCommands(app: App, plugin: Plugin) {
             continue;
           }
 
+          console.log(`[z5Linter] Adding ${templateFamily} v${templateVersion} at position (${placement.startX}, ${placement.startY})`)
           // Build nodes/edges for this template at computed origin
           const newCanvas = await makeCanvasNodesForTemplate(app, templatePath, placement.startX, placement.startY);
 
@@ -113,6 +122,186 @@ export function registerCanvasCommands(app: App, plugin: Plugin) {
       }
     },
   });
+
+
+  plugin.addCommand({
+    id: "z5-canvas-reflow-project-v2",
+    name: "z5Linter: Reflow template block (project v2.0.0)",
+    callback: async () => {
+      const outCanvasPath = "testMigrationData/migration.canvas";
+
+      try {
+        const vault = app.vault;
+
+        // 1) Load existing canvas JSON
+        let canvasJson: any = { nodes: [], edges: [], metadata: {} };
+        if (await vault.adapter.exists(outCanvasPath)) {
+          const raw = await vault.adapter.read(outCanvasPath);
+          try {
+            canvasJson = JSON.parse(raw);
+          } catch (e) {
+            new Notice("Canvas JSON invalid — cannot reflow.");
+            console.error("[z5Linter] Invalid canvas JSON:", e);
+            return;
+          }
+        } else {
+          new Notice("Canvas file not found — cannot reflow.");
+          return;
+        }
+
+        // 2) Run the reflow
+        await reflowTemplateBlock(app, canvasJson, "project", "2.0.0");
+
+        // 3) Write updated canvas back to disk
+        await writeCanvasJsonToFile(app, outCanvasPath, canvasJson, true);
+
+        new Notice("Reflowed template block: project v2.0.0");
+        console.log("[z5Linter] Reflowed project v2.0.0");
+
+      } catch (err) {
+        console.error("[z5Linter] Reflow failed:", err);
+        new Notice("Reflow failed — see console for details.");
+      }
+    },
+  });
+
+  plugin.addCommand({
+    id: "z5-canvas-mark-invalid-nodes",
+    name: "z5Linter: Mark canvas nodes with missing template metadata (red)",
+    callback: async () => {
+      const outCanvasPath = "testMigrationData/migration.canvas";
+      try {
+        const vault = app.vault;
+
+        if (!(await vault.adapter.exists(outCanvasPath))) {
+          new Notice("Canvas file not found: " + outCanvasPath);
+          return;
+        }
+
+        const raw = await vault.adapter.read(outCanvasPath);
+        let canvasJson: any;
+        try {
+          canvasJson = JSON.parse(raw);
+        } catch (e) {
+          new Notice("Canvas JSON invalid — cannot scan.");
+          console.error("[z5Linter] Invalid canvas JSON:", e);
+          return;
+        }
+
+        const changed = scanAndMarkInvalidTemplateNodes(canvasJson);
+
+        if (changed > 0) {
+          await writeCanvasJsonToFile(app, outCanvasPath, canvasJson, true);
+          new Notice(`Marked ${changed} node(s) with missing template metadata (red).`);
+          console.log("[z5Linter] Marked invalid nodes:", { changed, outCanvasPath });
+        } else {
+          new Notice("No nodes with missing template metadata found.");
+        }
+      } catch (err) {
+        console.error("[z5Linter] Mark-invalid-nodes command failed:", err);
+        new Notice("Mark-invalid-nodes failed — see console for details.");
+      }
+    },
+  });
+
+
+  plugin.addCommand({
+    id: "z5-canvas-repair-project-v2",
+    name: "z5Linter: Repair migration block (project v2.0.0)",
+    callback: async () => {
+      const outCanvasPath = "testMigrationData/migration.canvas";
+      try {
+        const vault = app.vault;
+
+        if (!(await vault.adapter.exists(outCanvasPath))) {
+          new Notice("Canvas file not found: " + outCanvasPath);
+          return;
+        }
+
+        const raw = await vault.adapter.read(outCanvasPath);
+        let canvasJson: any;
+        try {
+          canvasJson = JSON.parse(raw);
+        } catch (e) {
+          new Notice("Canvas JSON invalid — cannot repair.");
+          console.error("[z5Linter] Invalid canvas JSON:", e);
+          return;
+        }
+
+        const { removed, added, edgesAdded } = await repairMigrationBlock(app, canvasJson, "project", "2.0.0");
+
+        // Always write the canvas back to disk
+        try {
+          await writeCanvasJsonToFile(app, outCanvasPath, canvasJson, true);
+        } catch (writeErr) {
+          console.error("[z5Linter] Failed to write canvas after repair:", writeErr);
+          new Notice("Repair completed but failed to write canvas — see console.");
+          return;
+        }
+
+        if (removed > 0 || added > 0 || edgesAdded > 0) {
+          new Notice(`Repair complete: removed ${removed}, added ${added}, edges ${edgesAdded} for project v2.0.0.`);
+        } else {
+          new Notice("Repair complete: no structural changes required for project v2.0.0. Canvas file was still written.");
+        }
+
+        console.log("[z5Linter] Repair result:", { removed, added, edgesAdded, outCanvasPath });
+      } catch (err) {
+        console.error("[z5Linter] Repair failed:", err);
+        new Notice("Repair failed — see console for details.");
+      }
+    },
+  });
+
+
+
+  // actions that can be triggered from inside the canvas:
+
+  // Ensure invoker exists
+  ensureInvokerRegistered();
+
+  // Register the repair action so toolbar buttons can call it
+  window.z5Linter.register("repairMigrationBlock", async (args: { family?: string; version?: string; migrationCanvasPath?: string }) => {
+    console.info("[z5Linter.action] repairMigrationBlock called with", args);
+    if (!args || !args.family || !args.version) throw new Error("repairMigrationBlock requires family and version");
+
+    const family = String(args.family);
+    const version = String(args.version);
+    const outCanvasPath = String(args.migrationCanvasPath || "testMigrationData/migration.canvas");
+
+    const vault = app.vault;
+    if (!(await vault.adapter.exists(outCanvasPath))) {
+      throw new Error(`Canvas file not found: ${outCanvasPath}`);
+    }
+
+    const raw = await vault.adapter.read(outCanvasPath);
+    let canvasJson: any;
+    try {
+      canvasJson = JSON.parse(raw);
+    } catch (e) {
+      throw new Error("Canvas JSON invalid");
+    }
+
+    // Run repair (returns { removed, added, edgesAdded })
+    const result = await repairMigrationBlock(app, canvasJson, family, version);
+
+    // Always write the canvas back to disk, even if nothing structural changed.
+    try {
+      await writeCanvasJsonToFile(app, outCanvasPath, canvasJson, true);
+      console.info("[z5Linter.action] repairMigrationBlock wrote canvas to", outCanvasPath);
+    } catch (writeErr) {
+      console.error("[z5Linter.action] Failed to write canvas after repair:", writeErr);
+      // Still return the result but surface the write error to callers
+      return { ok: false, writeError: String(writeErr), ...result, outCanvasPath };
+    }
+
+    const changed = !!(result.removed || result.added || result.edgesAdded);
+    console.info("[z5Linter.action] repairMigrationBlock result", { result, changed });
+
+    return { ok: true, changed, ...result, outCanvasPath };
+  });
+
+
 }
 
 
@@ -162,90 +351,94 @@ export async function makeCanvasNodesForTemplate(
     templateFamily = deriveFamilyFromBasename(baseName);
   }
 
-  let groupLabel: string;
-  if (templateName) {
-    groupLabel = templateVersion ? `${templateName} v${templateVersion}` : String(templateName);
-  } else {
-    const base = templatePath.split("/").pop() || templatePath;
-    const baseName = base.replace(/\.md$/i, "");
-    const family = deriveFamilyFromBasename(baseName);
-    groupLabel = templateVersion ? `${family} v${templateVersion}` : family;
-  }
+  const headerX = Number(startX) || 0;
+  const headerY = Number(startY) || 0;
+  //const headerWidth = TEMPLATE_STACK_WIDTH;
+  //const headerHeight = HEADING_NODE_HEIGHT;
 
-  // Use startX/startY directly as the origin, but subtract the group margin (snapped to grid)
-  const snappedGroupMargin = Math.max(0, Math.round(GROUP_MARGIN_PX / CELL_SIZE) * CELL_SIZE);
+  // 0) Header node (use helper)
+  const headerNode = createHeaderNode(headerX, headerY, TEMPLATE_STACK_WIDTH, HEADING_NODE_HEIGHT, {
+    templateFamily,
+    templateVersion,
+  });
 
-  // Subtract the snapped margin once so the group (which expands by margin) aligns with the area nodes
-  const originX = Math.max(0, Number(startX) - snappedGroupMargin);
-  const originY = Math.max(0, Number(startY) - snappedGroupMargin);
+  // 1) Area column geometry
+  // frontmatter top = headerY + HEADING_NODE_HEIGHT + MAJOR_VERTICAL_SPACING + GROUP_MARGIN_PX
+  const areaColumnX = headerX + GROUP_MARGIN_PX;
+  const fmTopY = headerY + HEADING_NODE_HEIGHT + MAJOR_VERTICAL_SPACING + GROUP_MARGIN_PX;
+  const areaNodeWidth = Math.max(CELL_SIZE, TEMPLATE_STACK_WIDTH - 2 * GROUP_MARGIN_PX);
 
-
-  // 1) Frontmatter node (top)
-  const fmNode = createFrontmatterNode(front, originX, originY, {
+  // 2) Frontmatter node (use helper and explicit width so it matches area width)
+  const fmNode = createFrontmatterNode(front, areaColumnX, fmTopY, areaNodeWidth, FRONTMATTER_NODE_HEIGHT, {
     templateFamily,
     templateVersion,
     id: undefined,
     styleAttributes: undefined,
   });
 
-  // 2) Area nodes and group (area column starts below frontmatter)
-  const areaBaseY = originY + FRONTMATTER_NODE_HEIGHT + GROUP_CARD_Y_GAP;
-  const { groupNode: builtGroupNode, areaNodes } = buildAreaGroupNodes(
+  // 3) Area nodes (use buildAreaGroupNodes with areaWidth)
+  const built = buildAreaGroupNodes(
     areas,
-    originX,
-    areaBaseY,
-    { labelLine: true, templateFamily, templateVersion }
+    areaColumnX,
+    fmTopY + FRONTMATTER_NODE_HEIGHT + GROUP_CARD_Y_GAP,
+    { labelLine: true, templateFamily, templateVersion, areaWidth: areaNodeWidth }
   );
+  const areaNodes = built.areaNodes || [];
 
+  // 4) Compute final group from frontmatter + area nodes (no placeholder)
   const allNodesForGroup = [fmNode, ...areaNodes];
-
   const finalGroupNode = makeGroupForNodes(allNodesForGroup, {
-    label: groupLabel,
     templateFamily,
     templateVersion,
   });
+  const groupNode = finalGroupNode ? { ...finalGroupNode } : null;
 
-  const groupNode = finalGroupNode ? { ...finalGroupNode, label: groupLabel } : null;
-
-  // 3) Append group and group members to canvasJson (group first so it encloses the nodes)
+  // 5) Append header first (so it is not enclosed), then group, then frontmatter and area nodes
+  appendNodesToCanvasJson(canvasJson, headerNode);
   if (groupNode) appendNodesToCanvasJson(canvasJson, groupNode);
-  appendNodesToCanvasJson(canvasJson, allNodesForGroup);
+  appendNodesToCanvasJson(canvasJson, [fmNode, ...areaNodes]);
 
-  // 4) Control node (below group)
-  const controlX = groupNode ? Number(groupNode.x) || originX : originX;
-  const controlWidth = groupNode ? Number(groupNode.width) || AREA_NODE_WIDTH : AREA_NODE_WIDTH;
+  // 6) Control node (below group) — use canonical TEMPLATE_STACK_WIDTH
+  const controlX = groupNode ? Number(groupNode.x) || headerX : headerX;
+  const controlWidth = TEMPLATE_STACK_WIDTH;
   const controlYBase = groupNode
-    ? (Number(groupNode.y) || originY) + (Number(groupNode.height) || 0)
-    : (areaBaseY + areaNodes.length * (AREA_NODE_HEIGHT + GROUP_CARD_Y_GAP));
+    ? (Number(groupNode.y) || headerY) + (Number(groupNode.height) || 0)
+    : (fmTopY + FRONTMATTER_NODE_HEIGHT + areaNodes.length * (AREA_NODE_HEIGHT + GROUP_CARD_Y_GAP));
   const controlY = controlYBase + MAJOR_VERTICAL_SPACING;
 
-  const controlNode = createControlNode(controlX, controlY, controlWidth, CONTROL_NODE_HEIGHT, CELL_SIZE, {
+  const controlNode = createControlNode(controlX, controlY, controlWidth, {
     templateFamily,
     templateVersion,
   });
 
-  // 5) Embed node (wiki embed) placed below control node
+  // 7) Embed node (wiki embed) placed below control node — use canonical TEMPLATE_STACK_WIDTH
+  // createEmbedNode signature in your file: (app, templatePath, groupNode, anchorNode, baseX, baseY, templateFamily?, templateVersion?)
   const embedNode = await createEmbedNode(
     app,
     templatePath,
     groupNode,
     controlNode,
-    originX,
-    originY,
-    AREA_NODE_WIDTH,
-    MAJOR_VERTICAL_SPACING,
-    CELL_SIZE,
-    EMBED_NODE_HEIGHT,
+    headerX,
+    headerY,
     templateFamily,
     templateVersion
   );
 
-  // 6) Append control and embed nodes
+  // 8) Append control and embed nodes
   appendNodesToCanvasJson(canvasJson, controlNode);
   appendNodesToCanvasJson(canvasJson, embedNode);
 
-  // 7) Create edges (group -> control, control -> embed)
+  // 9) Create edges: header.bottom -> group.top, group.bottom -> control.top, control.bottom -> embed.top
   const edgesToAdd: any[] = [];
+  if (headerNode && groupNode) {
+    edgesToAdd.push(
+      createEdge(headerNode, "bottom", groupNode, "top", {
+        arrow: "bi",
+        arrowStyle: "blunt",
+        pathfinding: "direct",
+      })
+    );
+  }
   if (groupNode && controlNode) {
     edgesToAdd.push(
       createEdge(groupNode, "bottom", controlNode, "top", {
@@ -268,6 +461,8 @@ export async function makeCanvasNodesForTemplate(
 
   return canvasJson;
 }
+
+
 
 
 
@@ -403,11 +598,13 @@ export function buildAreaGroupNodes(
   opts?: {
     labelLine?: boolean;
     templateFamily?: string;
-    templateVersion?: string
+    templateVersion?: string;
+    areaWidth?: number;
   }
 ) {
   const areaNodes: any[] = [];
   const labelLine = opts?.labelLine ?? true;
+  const areaWidth = typeof opts?.areaWidth === "number" ? Math.max(CELL_SIZE, opts!.areaWidth) : TEMPLATE_STACK_WIDTH;
 
   for (let i = 0; i < areas.length; i++) {
     const a = areas[i];
@@ -425,11 +622,12 @@ export function buildAreaGroupNodes(
     const node = createCanvasNode({
       x,
       y,
-      width: AREA_NODE_WIDTH,
+      width: areaWidth,
       height: AREA_NODE_HEIGHT,
       type: "text",
       text: finalCallout,
       metadata: {
+        role: "area",
         areaId: a.id,
         areaLabel: a.label,
         source: "template",
@@ -437,17 +635,15 @@ export function buildAreaGroupNodes(
       z5LinterAttributes: makeZ5Attrs(
         opts?.templateFamily ?? null,
         opts?.templateVersion ?? null,
-        { role: "area", areaId: a.id, areaLabel: a.label }),
+        { role: "area", areaId: a.id, areaLabel: a.label }
+      ),
+      styleAttributes: mergeStyleAttrs(DEFAULT_NODE_STYLE, undefined),
       cellSize: CELL_SIZE,
     });
     areaNodes.push(node);
   }
-  const group = makeGroupForNodes(areaNodes, {
-    label: `Areas`,
-    templateFamily: opts?.templateFamily,
-    templateVersion: opts?.templateVersion,
-  });
-  return { groupNode: group, areaNodes };
+
+  return { areaNodes };
 }
 
 
@@ -466,6 +662,7 @@ export function createCanvasNode(opts: {
   height: number;
   type?: string;
   text?: string;
+  label?: string;
   metadata?: Record<string, any>;
   styleAttributes?: Record<string, any>;
   z5LinterAttributes?: Record<string, any>;
@@ -476,6 +673,7 @@ export function createCanvasNode(opts: {
     x, y, width, height,
     type = "text",
     text = "",
+    label,
     metadata = {},
     styleAttributes = {},
     z5LinterAttributes = {},
@@ -501,6 +699,9 @@ export function createCanvasNode(opts: {
     height: snapped.height,
     metadata: finalMetadata,
   };
+
+  // Optional label property (used by Canvas for group nodes)
+  if (typeof label !== "undefined") node.label = label;
 
   return node;
 }
@@ -589,13 +790,12 @@ export function snapRect(rect: { x: number; y: number; width: number; height: nu
 export function makeGroupForNodes(
   nodes: any[],
   opts?: {
-    label?: string;
+    //label?: string; // intentionally not used for groups
     templateFamily?: string;
-    templateVersion?: string;}
+    templateVersion?: string;
+  }
 ) {
   if (!nodes || nodes.length === 0) return null;
-
-  const label = opts?.label ?? "Group";
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const n of nodes) {
@@ -619,24 +819,26 @@ export function makeGroupForNodes(
   // Snap group rect to grid
   const groupRect = snapRect({ x: minX, y: minY, width: maxX - minX, height: maxY - minY });
 
-  // Build group node (Canvas expects label property rather than text)
-  const groupNode: any = {
-    id: uuidv4(),
-    type: "group",
+  // Build group node via createCanvasNode so id/snapping/metadata flow through the single factory
+  const z5 = makeZ5Attrs(opts?.templateFamily ?? null, opts?.templateVersion ?? null, { role: "group" });
+
+  const groupNode = createCanvasNode({
     x: groupRect.x,
     y: groupRect.y,
     width: groupRect.width,
     height: groupRect.height,
-    label,
+    type: "group",
+    text: "", // groups don't render `text`
+    metadata: {}, // createCanvasNode will attach z5LinterAttributes below
+    z5LinterAttributes: z5,
     styleAttributes: {},
-    metadata: {
-      z5LinterAttributes: makeZ5Attrs(opts?.templateFamily ?? null, opts?.templateVersion ?? null, { role: "group", label })
-    },
-  };
-
+    cellSize: CELL_SIZE,
+    // intentionally do NOT pass label here; groups should not receive a label property
+  });
 
   return groupNode;
 }
+
 
 
 /**
@@ -659,6 +861,8 @@ export function createFrontmatterNode(
   frontmatter: Record<string, string> | undefined,
   x: number,
   y: number,
+  width = TEMPLATE_STACK_WIDTH,
+  height = FRONTMATTER_NODE_HEIGHT,
   opts?: {
     id?: string;
     styleAttributes?: Record<string, any>;
@@ -686,21 +890,20 @@ export function createFrontmatterNode(
   const calloutLines = [calloutHeader, ...tableLines.map((ln) => `> ${ln}`)];
   const text = calloutLines.join("\n");
 
-  // Prefer explicit z5LinterAttributes if provided; otherwise build minimal attrs from template info.
   const z5Attrs =
     opts?.z5LinterAttributes ??
     makeZ5Attrs(opts?.templateFamily ?? null, opts?.templateVersion ?? null, { role: "frontmatter" });
 
   return createCanvasNode({
-    x: x,
-    y: y,
-    width: AREA_NODE_WIDTH,
-    height: FRONTMATTER_NODE_HEIGHT,
+    x,
+    y,
+    width,
+    height,
     type: "text",
-    text: text,
+    text,
     metadata: { role: "frontmatter" },
     z5LinterAttributes: z5Attrs,
-    styleAttributes: opts?.styleAttributes ?? {},
+    styleAttributes: mergeStyleAttrs(DEFAULT_NODE_STYLE, opts?.styleAttributes),
     cellSize: CELL_SIZE,
     id: opts?.id,
   });
@@ -713,28 +916,7 @@ export function createFrontmatterNode(
 
 
 
-/**
- * Create an embed node containing the full raw template text.
- *
- * - app: Obsidian App (used to read the template file)
- * - templatePath: path to the markdown template to embed
- * - groupNode: the group node that the embed should align with (may be null)
- * - baseX/baseY/cardWidth/yGap/cellSize: layout params used as fallbacks
- * - minHeight: minimum height for the embed node (default 400)
- *
- * Returns a Canvas node object (does not write to disk).
- */
-/**
- * Create an embed node that contains a wiki-style embed to the template file.
- *
- * - app: Obsidian App (used only to validate file existence optionally)
- * - templatePath: path to the markdown template to embed (used verbatim inside ![[...]])
- * - groupNode: the group node that the embed should align with (may be null)
- * - baseX/baseY/fallbackWidth/yGap/cellSize: layout params used as fallbacks
- * - minHeight: minimum height for the embed node (default EMBED_NODE_HEIGHT)
- *
- * Returns a Canvas node object (does not write to disk).
- */
+
 /**
  * Create an embed node that contains a wiki-style embed to the template file.
  *
@@ -766,8 +948,8 @@ export async function createEmbedNode(
     : (groupNode ? Number(groupNode.x) || baseX : baseX);
 
   const embedWidth = anchorNode
-    ? (Number(anchorNode.width) || (groupNode ? Number(groupNode.width) || AREA_NODE_WIDTH : AREA_NODE_WIDTH))
-    : (groupNode ? Number(groupNode.width) || AREA_NODE_WIDTH : AREA_NODE_WIDTH);
+    ? (Number(anchorNode.width) || (groupNode ? Number(groupNode.width) || TEMPLATE_STACK_WIDTH : TEMPLATE_STACK_WIDTH))
+    : (groupNode ? Number(groupNode.width) || TEMPLATE_STACK_WIDTH : TEMPLATE_STACK_WIDTH);
 
   // Determine Y: if anchorNode provided, place below anchor; else if groupNode provided, place below group; else use baseY
   const embedYBase = anchorNode
@@ -787,8 +969,9 @@ export async function createEmbedNode(
     height: embedHeight,
     type: "text",
     text: wikiEmbed,
+    styleAttributes: mergeStyleAttrs(DEFAULT_NODE_STYLE, {"textAlign":"null"}), // write a default for future maintenance.
     metadata: { role: "embedded-template", sourceFile: templatePath },
-    z5LinterAttributes: makeZ5Attrs(templateFamily ?? null, templateVersion ?? null, { role: "embedded-template", sourceFile: templatePath }),
+    z5LinterAttributes: makeZ5Attrs(templateFamily ?? null, templateVersion ?? null, { sourceFile: templatePath }),
     cellSize: CELL_SIZE,
   });
 
@@ -813,21 +996,46 @@ export function createControlNode(
   x: number,
   y: number,
   width: number,
-  opts?: { id?: string; styleAttributes?: Record<string, any>; templateFamily?: string; templateVersion?: string; z5LinterAttributes?: Record<string, any> }
+  opts?: {
+    id?: string;
+    styleAttributes?: Record<string, any>;
+    templateFamily?: string | null;
+    templateVersion?: string | null;
+    z5LinterAttributes?: Record<string, any>;
+  }
 ) {
+  const family = opts?.templateFamily ?? null;
+  const version = opts?.templateVersion ?? null;
+
+  const toolbarCodeblock = makeToolbarCodeblock(family, version);
+
   return createCanvasNode({
     x,
     y,
     width,
     height: CONTROL_NODE_HEIGHT,
     type: "text",
-    text: "", // blank for now
+    text: toolbarCodeblock,
     metadata: { role: "control" },
-    styleAttributes: opts?.styleAttributes ?? {},
-    z5LinterAttributes: opts?.z5LinterAttributes ?? makeZ5Attrs(opts?.templateFamily ?? null, opts?.templateVersion ?? null, { role: "control" }),
+    styleAttributes: mergeStyleAttrs(DEFAULT_NODE_STYLE, opts?.styleAttributes),
+    z5LinterAttributes:
+      opts?.z5LinterAttributes ??
+      makeZ5Attrs(family, version, { role: "control" }),
     cellSize: CELL_SIZE,
     id: opts?.id,
   });
+}
+
+
+// creates the migration block toolbar codeblock
+function makeToolbarCodeblock(family: string | null, version: string | null): string {
+  return [
+    "```z5LinterToolbar",
+    "type: template_migration_block_toolbar",
+    `template_family: ${family ?? ""}`,
+    `template_version: ${version ?? ""}`,
+    "```"
+  ].join("\n");
 }
 
 
@@ -1059,23 +1267,30 @@ export function findTemplateMatchesInCanvas(
 }
 
 /**
- * Find the group node with the highest templateVersion for a given family.
- * - canvasJson: object with nodes array
- * - family: template family to search
+ * Find the header node with the highest templateVersion for a given family.
+ * - Looks for nodes that carry z5LinterAttributes.templateFamily and templateVersion
+ *   and that are header nodes (metadata.role === "header" OR z5LinterAttributes.role === "header").
  *
- * Returns the node and its version string, or null if none found.
+ * Returns: { node, version } | null
  */
-export function findHighestVersionGroupNode(canvasJson: any, family: string) {
+export function findHighestVersionHeaderNode(canvasJson: any, family: string) {
   if (!canvasJson || !Array.isArray(canvasJson.nodes)) return null;
 
   let bestNode: any = null;
   let bestVersion: string | null = null;
 
   for (const node of canvasJson.nodes) {
-    if (!node || node.type !== "group") continue; // <-- only groups
+    if (!node) continue;
+
+    const mdRole = node.metadata && node.metadata.role;
     const z = getZ5Attrs(node);
+    const zRole = z && z.role;
+    const isHeader = (String(mdRole || "").toLowerCase() === "header") || (String(zRole || "").toLowerCase() === "header");
+    if (!isHeader) continue;
+
     if (!z) continue;
     if (String(z.templateFamily) !== String(family)) continue;
+
     const nodeVersion = z.templateVersion ?? null;
 
     if (bestNode === null) {
@@ -1100,6 +1315,7 @@ export function findHighestVersionGroupNode(canvasJson: any, family: string) {
 
   return bestNode ? { node: bestNode, version: bestVersion ?? "" } : null;
 }
+
 
 
 
@@ -1135,32 +1351,39 @@ export function computePlacementForTemplate(
     return { shouldAdd: false, startX: defaultStartX, startY: defaultStartY };
   }
 
-  // Find highest-version group node (groups only)
-  const best = findHighestVersionGroupNode(canvasJson, templateFamily);
+  // Prefer header node for placement (highest version header)
+  const bestHeader = findHighestVersionHeaderNode(canvasJson, templateFamily);
 
-  // Snapped group margin (same logic as makeGroupForNodes)
-  const snappedGroupMargin = Math.max(0, Math.round(GROUP_MARGIN_PX / CELL_SIZE) * CELL_SIZE);
+  console.log("[z5Linter] computePlacementForTemplate (header-only):", {
+    templateFamily,
+    templateVersion,
+    exactFound: exact.found,
+    bestHeader: bestHeader ? { id: bestHeader.node.id, x: bestHeader.node.x, y: bestHeader.node.y, width: bestHeader.node.width } : null,
+  });
 
-  if (!best) {
-    // No existing family found — place at defaults (subtract margin so group encloses correctly)
+  if (!bestHeader) {
+    // No header found — place at provided defaults (treat defaults as header origin)
     return {
       shouldAdd: true,
-      startX: Math.max(0, Number(defaultStartX) - snappedGroupMargin),
-      startY: Math.max(0, Number(defaultStartY) - snappedGroupMargin),
+      startX: Number(defaultStartX),
+      startY: Number(defaultStartY),
     };
   }
 
-  // Place to the right of the highest-version group node (align vertically with the group)
-  const node = best.node;
-  const nodeX = Number(node.x) || 0;
-  const nodeY = Number(node.y) || 0;
-  const nodeW = Number(node.width) || 0;
+  // Base placement on header coordinates only
+  const h = bestHeader.node;
+  const headerX = Number(h.x) || 0;
+  const headerY = Number(h.y) || 0;
+  const headerW = Number(h.width) || TEMPLATE_STACK_WIDTH;
 
-  const newStartX = nodeX + nodeW + TEMPLATE_GROUP_HORIZONTAL_OFFSET - snappedGroupMargin;
-  const newStartY = Math.max(0, nodeY - snappedGroupMargin);
+  // Place new header to the right of previous header
+  const newStartX = headerX + headerW + TEMPLATE_GROUP_HORIZONTAL_OFFSET;
+  const newStartY = headerY;
 
-  return { shouldAdd: true, startX: newStartX, startY: newStartY, anchorNode: node };
+  console.log("[z5Linter] computePlacementForTemplate -> using header anchor", { newStartX, newStartY });
+  return { shouldAdd: true, startX: newStartX, startY: newStartY, anchorNode: h };
 }
+
 
 
 
@@ -1243,6 +1466,7 @@ export function mergeCanvasJson(baseCanvas: any, newCanvas: any) {
  * - folderPath: vault-relative folder path (e.g., "testMigrationData/templates")
  * - family: template family to match (string)
  */
+// TODO: recursive, or search multiple paths
 export async function findTemplatesInFolderByFamily(
   app: App,
   folderPath: string,
@@ -1285,4 +1509,649 @@ export async function findTemplatesInFolderByFamily(
   });
 
   return out;
+}
+
+
+
+
+/**
+ * Create a simple header node placed above a group.
+ *
+ * - title: string to render (e.g., "## project V1.0.0")
+ * - x,y,width,height: geometry (snapped by createCanvasNode)
+ * - templateFamily/templateVersion: provenance metadata
+ */
+export function createHeaderNode(
+  x: number,
+  y: number,
+  width = TEMPLATE_STACK_WIDTH,
+  height = HEADING_NODE_HEIGHT,
+  opts?: { id?: string; styleAttributes?: Record<string, any>; templateFamily?: string | null; templateVersion?: string | null }
+) {
+  const z5 = makeZ5Attrs(opts?.templateFamily ?? null, opts?.templateVersion ?? null, { role: "header" });
+
+
+  const family = opts?.templateFamily ?? null;
+  const version = opts?.templateVersion ?? null;
+
+  const headerTitle = `## ${family} V${version}`;
+  const toolbarCodeblock = makeToolbarCodeblock(family, version);
+
+  const nodeText = `${headerTitle}\n\n${toolbarCodeblock}\n`;
+
+  return createCanvasNode({
+    x,
+    y,
+    width,
+    height,
+    type: "text",
+    text: nodeText,
+    metadata: { role: "header" },
+    z5LinterAttributes: z5,
+    styleAttributes: mergeStyleAttrs(DEFAULT_NODE_STYLE, opts?.styleAttributes),
+    cellSize: CELL_SIZE,
+    id: opts?.id,
+  });
+}
+
+
+
+function mergeStyleAttrs(
+  base: Record<string, any> | undefined,
+  override: Record<string, any> | undefined
+): Record<string, any> {
+  return {
+    ...(base ?? {}),
+    ...(override ?? {}),
+  };
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// TEMPLATE NODE REPAIR AND REFLOW
+
+
+/**
+ * Repair a single template migration block (family + version) inside an in-memory canvas JSON.
+ *
+ * Steps:
+ *  1) Remove nodes that belong to the family/version but are invalid (missing role, family, or version).
+ *  2) Build canonical nodes from the template file and add any nodes that are missing (header, frontmatter, area nodes, group, control, embed).
+ *  3) Call reflowTemplateBlock to snap everything into canonical positions.
+ *
+ * Returns an object with counts: { removed, added }.
+ */
+/**
+ * Repair a single template migration block (family + version) inside an in-memory canvas JSON.
+ *
+ * Steps:
+ *  1) Remove nodes that belong to the family/version but are invalid (missing role, family, or version).
+ *  2) Build canonical nodes from the template file and add any nodes that are missing (header, frontmatter, area nodes, group, control, embed).
+ *  3) Reflow the block so geometry is correct.
+ *  4) Ensure canonical in-block edges exist (header -> group -> control -> embed) and add any missing edges.
+ *
+ * Returns an object with counts: { removed, added, edgesAdded }.
+ */
+export async function repairMigrationBlock(
+  app: App,
+  canvasJson: any,
+  templateFamily: string,
+  templateVersion: string
+): Promise<{ removed: number; added: number; edgesAdded: number }> {
+  if (!canvasJson || !Array.isArray(canvasJson.nodes)) {
+    throw new Error("Invalid canvas JSON");
+  }
+
+  // --- small helpers (local, robust) ---
+  const readZ5 = (n: any) => n?.metadata?.z5LinterAttributes ?? {};
+  const readMd = (n: any) => n?.metadata ?? {};
+  const normStr = (v: any) => (v === null || typeof v === "undefined" ? "" : String(v).trim().toLowerCase());
+
+  function readNodeAttrs(n: any) {
+    const z5 = readZ5(n);
+    const md = readMd(n);
+    return {
+      family: normStr(z5.templateFamily ?? md.templateFamily ?? ""),
+      version: normStr(z5.templateVersion ?? md.templateVersion ?? ""),
+      role: normStr(z5.role ?? md.role ?? n.type ?? ""),
+      areaId: normStr(z5.areaId ?? md.areaId ?? ""),
+    };
+  }
+
+  // --- 1) Remove clearly invalid nodes that claim to belong to this family/version but lack role/family/version ---
+  let removed = 0;
+  const kept: any[] = [];
+  for (const n of canvasJson.nodes) {
+    const z5 = readZ5(n);
+    const md = readMd(n);
+
+    const familyRaw = z5.templateFamily ?? md.templateFamily ?? null;
+    const versionRaw = z5.templateVersion ?? md.templateVersion ?? null;
+    const roleRaw = z5.role ?? md.role ?? n.type ?? null;
+
+    // If node does not belong to this family/version, keep it
+    if (normStr(familyRaw) !== normStr(templateFamily) || normStr(versionRaw) !== normStr(templateVersion)) {
+      kept.push(n);
+      continue;
+    }
+
+    // Node belongs to this family/version — validate presence of role/family/version
+    const hasFamily = typeof familyRaw === "string" && familyRaw.trim().length > 0;
+    const hasVersion = typeof versionRaw === "string" && String(versionRaw).trim().length > 0;
+    const hasRole = typeof roleRaw === "string" && roleRaw.trim().length > 0;
+
+    // If any required piece missing, drop the node (clear it)
+    if (!hasFamily || !hasVersion || !hasRole) {
+      removed++;
+      continue;
+    }
+
+    // Otherwise keep
+    kept.push(n);
+  }
+
+  // Replace nodes array with kept nodes
+  canvasJson.nodes = kept;
+
+  // --- 2) Collect existing nodes for this template (normalized) ---
+  const targetFamilyNorm = normStr(templateFamily);
+  const targetVersionNorm = normStr(templateVersion);
+
+  // Defensive: ensure metadata objects exist so later code can mirror attributes
+  for (const n of canvasJson.nodes) {
+    n.metadata = n.metadata || {};
+    n.metadata.z5LinterAttributes = Object.assign({}, n.metadata.z5LinterAttributes || {});
+  }
+
+  const existingNodesForTemplate = canvasJson.nodes.filter((n: any) => {
+    const attrs = readNodeAttrs(n);
+    return attrs.family === targetFamilyNorm && attrs.version === targetVersionNorm;
+  });
+
+  console.debug(`[z5Linter] existingNodesForTemplate count=${existingNodesForTemplate.length} for ${templateFamily} v${templateVersion}`);
+
+  // --- 3) Determine anchor and build fresh canonical nodes ---
+  // Prefer existing header position as anchor if present; repair will force reposition later.
+  const headerNode = existingNodesForTemplate.find(n => {
+    const a = readNodeAttrs(n);
+    return a.role === "header";
+  });
+  const anchorX = headerNode ? Number(headerNode.x) || 80 : 80;
+  const anchorY = headerNode ? Number(headerNode.y) || 80 : 80;
+
+  const templatePath = await findTemplatePathForFamilyVersion(app, templateFamily, templateVersion);
+  if (!templatePath) {
+    throw new Error(`Template file not found for ${templateFamily} v${templateVersion}`);
+  }
+
+  const freshCanvas = await makeCanvasNodesForTemplate(app, templatePath, anchorX, anchorY);
+  const freshNodes: any[] = freshCanvas.nodes || [];
+
+  // --- 4) Build normalized key maps for existing nodes ---
+  const existingByKey = new Map<string, any>();
+  for (const n of existingNodesForTemplate) {
+    const attrs = readNodeAttrs(n);
+    let key = attrs.role || (n.type || "").toLowerCase();
+    if (attrs.role === "area") key += `:${attrs.areaId}`;
+    existingByKey.set(key, n);
+  }
+
+  // --- 5) Add any missing canonical nodes (and mirror metadata for existing ones) ---
+  let added = 0;
+  for (const f of freshNodes) {
+    const z5f = f?.metadata?.z5LinterAttributes ?? {};
+    const mdf = f?.metadata ?? {};
+    const roleRaw = z5f.role ?? mdf.role ?? f.type ?? "";
+    const areaIdRaw = z5f.areaId ?? mdf.areaId ?? "";
+    const role = normStr(roleRaw);
+    const areaId = normStr(areaIdRaw);
+    let key = role || (f.type || "").toLowerCase();
+    if (role === "area") key += `:${areaId}`;
+
+    if (!existingByKey.has(key)) {
+      // Add the fresh node into the canvas (preserve id from fresh node)
+      const nodeToAdd = { ...f };
+      nodeToAdd.metadata = Object.assign({}, nodeToAdd.metadata || {});
+      nodeToAdd.metadata.z5LinterAttributes = Object.assign({}, nodeToAdd.metadata.z5LinterAttributes || {});
+      // Mirror role into metadata.role for consistency
+      if (!nodeToAdd.metadata.role && nodeToAdd.metadata.z5LinterAttributes?.role) {
+        nodeToAdd.metadata.role = nodeToAdd.metadata.z5LinterAttributes.role;
+      }
+      canvasJson.nodes.push(nodeToAdd);
+      existingByKey.set(key, nodeToAdd); // so subsequent fresh nodes see it
+      added++;
+    } else {
+      // Ensure metadata is mirrored into existing node (defensive)
+      const existing = existingByKey.get(key);
+      existing.metadata = existing.metadata || {};
+      existing.metadata.z5LinterAttributes = Object.assign({}, existing.metadata.z5LinterAttributes || {}, f.metadata?.z5LinterAttributes || {});
+      if (!existing.metadata.role && existing.metadata.z5LinterAttributes?.role) {
+        existing.metadata.role = existing.metadata.z5LinterAttributes.role;
+      }
+    }
+  }
+
+  // --- 6) Force reflow so geometry is canonical (repair should restore positions) ---
+  // Use forceReposition true so header + children are placed according to canonical template.
+  await reflowTemplateBlock(app, canvasJson, templateFamily, templateVersion);
+
+  // --- 7) Ensure canonical in-block edges exist and get count ---
+  const edgesAdded = ensureTemplateEdges(canvasJson, templateFamily, templateVersion);
+
+  // --- 8) Return counts (structural results only) ---
+  return { removed, added, edgesAdded };
+}
+
+
+
+
+
+// fixes positioning for a specific template family and version
+export async function reflowTemplateBlock(
+  app: App,
+  canvasJson: any,
+  templateFamily: string,
+  templateVersion: string
+) {
+  if (!canvasJson || !Array.isArray(canvasJson.nodes)) {
+    throw new Error("Invalid canvas JSON");
+  }
+
+  const readZ5 = (n: any) => n?.metadata?.z5LinterAttributes ?? {};
+  const readMd = (n: any) => n?.metadata ?? {};
+  const normStr = (v: any) => (v === null || typeof v === "undefined" ? "" : String(v).trim().toLowerCase());
+
+  // 1) Collect all nodes belonging to this template version (robust lookup)
+  const nodes = canvasJson.nodes.filter(n => {
+    const z5 = readZ5(n);
+    const md = readMd(n);
+    const family = normStr(z5.templateFamily ?? md.templateFamily ?? "");
+    const version = normStr(z5.templateVersion ?? md.templateVersion ?? "");
+    return family === normStr(templateFamily) && version === normStr(templateVersion);
+  });
+
+  if (!nodes.length) {
+    console.warn(`[z5Linter] reflowTemplateBlock: no nodes found for ${templateFamily} v${templateVersion}`);
+    return;
+  }
+
+  // 2) Build fresh canonical layout at origin so we have stable canonical positions
+  const templatePath = await findTemplatePathForFamilyVersion(app, templateFamily, templateVersion);
+  if (!templatePath) {
+    throw new Error(`Template file not found for ${templateFamily} v${templateVersion}`);
+  }
+
+  const freshAtOrigin = await makeCanvasNodesForTemplate(app, templatePath, 0, 0);
+  const freshNodes = (freshAtOrigin.nodes || []).map((n: any) => ({ ...n }));
+
+  // 3) Find fresh canonical header (source anchor)
+  const freshHeader = freshNodes.find((n: any) => {
+    const z5 = n?.metadata?.z5LinterAttributes ?? {};
+    const md = n?.metadata ?? {};
+    const role = (z5.role ?? md.role ?? n.type) ?? "";
+    return role === "header";
+  });
+
+  if (!freshHeader) {
+    console.warn(`[z5Linter] reflowTemplateBlock: fresh header not found for ${templateFamily} v${templateVersion}`);
+    return;
+  }
+
+  const freshAnchorX = Number(freshHeader.x) || 0;
+  const freshAnchorY = Number(freshHeader.y) || 0;
+
+  // 4) Determine target anchor: prefer existing header position if present, otherwise use canonical header
+  const existingHeader = nodes.find(n => {
+    const z5 = readZ5(n);
+    const md = readMd(n);
+    const role = (z5.role ?? md.role ?? n.type) ?? "";
+    return role === "header";
+  });
+
+  const targetAnchorX = existingHeader ? Number(existingHeader.x) || 0 : Number(freshHeader.x) || 0;
+  const targetAnchorY = existingHeader ? Number(existingHeader.y) || 0 : Number(freshHeader.y) || 0;
+
+  // Compute translation from fresh origin to target anchor
+  const offsetX = targetAnchorX - freshAnchorX;
+  const offsetY = targetAnchorY - freshAnchorY;
+
+  // 5) Build freshByKey map (role + optional areaId) and translate positions into target space
+  const freshByKey = new Map<string, any>();
+  for (const fn of freshNodes) {
+    const z5 = fn?.metadata?.z5LinterAttributes ?? {};
+    const md = fn?.metadata ?? {};
+    const role = (z5.role ?? md.role ?? fn.type ?? "") ?? "";
+    const areaId = (z5.areaId ?? md.areaId ?? "") ?? "";
+    let key = role || (fn.type || "").toLowerCase();
+    if (role === "area") key += `:${areaId}`;
+
+    const translated = { ...fn };
+    translated.x = (Number(fn.x) || 0) + offsetX;
+    translated.y = (Number(fn.y) || 0) + offsetY;
+    freshByKey.set(key, translated);
+  }
+
+  // 6) Apply fresh geometry to existing nodes (unconditionally overwrite when mapping exists)
+  for (const oldNode of nodes) {
+    // Defensive metadata shape
+    oldNode.metadata = oldNode.metadata || {};
+    oldNode.metadata.z5LinterAttributes = Object.assign({}, oldNode.metadata.z5LinterAttributes || {});
+
+    const z5 = oldNode.metadata.z5LinterAttributes;
+    const md = oldNode.metadata;
+    const role = (z5.role ?? md.role ?? oldNode.type ?? "") ?? "";
+    const areaId = (z5.areaId ?? md.areaId ?? "") ?? "";
+    let key = role || (oldNode.type || "").toLowerCase();
+    if (role === "area") key += `:${areaId}`;
+
+    const freshNode = freshByKey.get(key);
+    if (!freshNode) {
+      // no canonical mapping for this node; skip
+      continue;
+    }
+
+    // Overwrite geometry to canonical values
+    oldNode.x = Number(freshNode.x);
+    oldNode.y = Number(freshNode.y);
+    oldNode.width = Number(freshNode.width) || oldNode.width;
+    oldNode.height = Number(freshNode.height) || oldNode.height;
+
+    // Merge style attributes: canonical defaults then preserve any user overrides
+    oldNode.styleAttributes = mergeStyleAttrs(DEFAULT_NODE_STYLE, oldNode.styleAttributes);
+
+    // Mirror canonical z5 attrs into existing node metadata for consistency
+    oldNode.metadata.z5LinterAttributes = Object.assign({}, oldNode.metadata.z5LinterAttributes || {}, freshNode.metadata?.z5LinterAttributes || {});
+    if (!oldNode.metadata.role && oldNode.metadata.z5LinterAttributes?.role) {
+      oldNode.metadata.role = oldNode.metadata.z5LinterAttributes.role;
+    }
+  }
+
+  // 7) Recompute group geometry (if group exists)
+  const group = nodes.find(n => n.type === "group" || (readZ5(n).role === "group") || (readMd(n).role === "group"));
+  if (group) {
+    const children = nodes.filter(n => {
+      const role = (readZ5(n).role ?? readMd(n).role ?? n.type) ?? "";
+      return role === "frontmatter" || role === "area";
+    });
+
+    if (children.length) {
+      const newGroup = makeGroupForNodes(children, { templateFamily, templateVersion });
+      if (newGroup) {
+        group.x = newGroup.x;
+        group.y = newGroup.y;
+        group.width = newGroup.width;
+        group.height = newGroup.height;
+      }
+    } else {
+      console.debug(`[z5Linter] reflowTemplateBlock: no children to rebuild group for ${templateFamily} v${templateVersion}`);
+    }
+  }
+
+  console.log(`[z5Linter] Reflowed ${templateFamily} v${templateVersion}`);
+}
+
+
+
+async function findTemplatePathForFamilyVersion(app: App, family: string, version: string) {
+  const folder = "testMigrationData/templates";
+  const list = await findTemplatesInFolderByFamily(app, folder, family);
+  const match = list.find(t => t.templateVersion === version);
+  return match?.path ?? null;
+}
+
+
+
+
+/** Normalize an edge object into canonical fields we care about */
+function normalizeEdgeObj(edge: any) {
+  if (!edge || typeof edge !== "object") return null;
+  const fId = edge.fromNode ?? edge.fromId ?? edge.from ?? edge.fromNodeId ?? edge.source ?? edge.start ?? null;
+  const tId = edge.toNode ?? edge.toId ?? edge.to ?? edge.toNodeId ?? edge.target ?? edge.end ?? null;
+  const fSide = edge.fromSide ?? edge.startSide ?? edge.sourceSide ?? edge.startAnchor ?? edge.startHandle ?? null;
+  const tSide = edge.toSide ?? edge.endSide ?? edge.targetSide ?? edge.endAnchor ?? edge.endHandle ?? null;
+  return { fId: fId ? String(fId) : null, tId: tId ? String(tId) : null, fSide: fSide ? String(fSide) : null, tSide: tSide ? String(tSide) : null };
+}
+
+/** Remove duplicate edges from canvasJson.edges (keeps first occurrence) */
+function dedupeCanvasEdges(canvasJson: any) {
+  if (!canvasJson || !Array.isArray(canvasJson.edges)) return 0;
+  const seen = new Set<string>();
+  const out: any[] = [];
+  let removed = 0;
+  for (const e of canvasJson.edges) {
+    const ex = normalizeEdgeObj(e);
+    if (!ex || !ex.fId || !ex.tId) {
+      // keep malformed edges as-is
+      out.push(e);
+      continue;
+    }
+    // canonical key: id-only (we prefer id-only dedupe)
+    const key = `${ex.fId}->${ex.tId}${(ex.fSide || ex.tSide) ? `|${ex.fSide}->${ex.tSide}` : ""}`;
+    if (seen.has(key)) {
+      removed++;
+      continue;
+    }
+    seen.add(key);
+    out.push(e);
+  }
+  canvasJson.edges = out;
+  return removed;
+}
+
+function edgeExistsByNodeIds(canvasJson: any, fromId: string, toId: string) {
+  if (!canvasJson || !Array.isArray(canvasJson.edges)) return false;
+  for (const e of canvasJson.edges) {
+    const ex = normalizeEdgeObj(e);
+    if (!ex || !ex.fId || !ex.tId) continue;
+    if (String(ex.fId) === String(fromId) && String(ex.tId) === String(toId)) return true;
+  }
+  return false;
+}
+
+
+export function ensureTemplateEdges(
+  canvasJson: any,
+  templateFamily: string,
+  templateVersion: string
+): number {
+  if (!canvasJson || !Array.isArray(canvasJson.nodes)) throw new Error("Invalid canvas JSON");
+
+  const readZ5 = (n: any) => n?.metadata?.z5LinterAttributes ?? {};
+  const readMd = (n: any) => n?.metadata ?? {};
+
+  // collect nodes for this template
+  const nodesForTemplate = (canvasJson.nodes || []).filter((n: any) => {
+    const z5 = readZ5(n);
+    const md = readMd(n);
+    const family = (z5.templateFamily ?? md.templateFamily) ?? null;
+    const version = (z5.templateVersion ?? md.templateVersion) ?? null;
+    return family === templateFamily && version === templateVersion;
+  });
+
+  if (!nodesForTemplate.length) return 0;
+
+  // find canonical nodes (try z5 role first, then metadata.role, then type)
+  const findByRole = (role: string, areaId?: string) => {
+    return nodesForTemplate.find((n: any) => {
+      const z5 = readZ5(n);
+      const md = readMd(n);
+      const r = (z5.role ?? md.role ?? n.type) ?? "";
+      if (role !== "area") return r === role;
+      if (r !== "area") return false;
+      if (typeof areaId === "undefined") return true;
+      const aId = (z5.areaId ?? md.areaId ?? "");
+      return String(aId) === String(areaId);
+    });
+  };
+
+  const header = findByRole("header");
+  const group = nodesForTemplate.find((n: any) => n.type === "group" || (readZ5(n).role === "group") || (readMd(n).role === "group"));
+  const control = findByRole("control");
+  const embed = findByRole("embedded-template") || findByRole("embedded") || nodesForTemplate.find((n: any) => (readMd(n).role === "embedded-template"));
+
+  const desiredEdges: Array<{ from: any; fromSide: string; to: any; toSide: string; opts?: any }> = [];
+  if (header && group) desiredEdges.push({ from: header, fromSide: "bottom", to: group, toSide: "top", opts: { arrow: "none", arrowStyle: "blunt", pathfinding: "direct" } });
+  if (group && control) desiredEdges.push({ from: group, fromSide: "bottom", to: control, toSide: "top", opts: { arrow: "bi", arrowStyle: "blunt", pathfinding: "direct" } });
+  if (control && embed) desiredEdges.push({ from: control, fromSide: "bottom", to: embed, toSide: "top", opts: { arrow: "bi", arrowStyle: "blunt", pathfinding: "direct" } });
+
+  if (!Array.isArray(canvasJson.edges)) canvasJson.edges = [];
+
+  // Clean up any pre-existing exact duplicates first (helps with historical duplicates)
+  const removedBefore = dedupeCanvasEdges(canvasJson);
+  if (removedBefore > 0) {
+    console.debug(`[z5Linter] ensureTemplateEdges removed ${removedBefore} pre-existing duplicate edges`);
+  }
+
+  const edgesAdded: any[] = [];
+
+  for (const d of desiredEdges) {
+    const fromId = String(d.from.id);
+    const toId = String(d.to.id);
+
+    // Simple, robust existence check: if any edge already connects these two node ids, skip.
+    if (edgeExistsByNodeIds(canvasJson, fromId, toId)) {
+      continue;
+    }
+
+    // Not present — create a new edge via your helper
+    try {
+      const newEdge = createEdge(d.from, d.fromSide, d.to, d.toSide, d.opts || {});
+
+      // Normalize the new edge to include canonical id fields used in your canvas
+      const normalized: any = Object.assign({}, newEdge);
+      normalized.fromId = normalized.fromId ?? normalized.from ?? normalized.fromNode ?? normalized.fromNodeId ?? normalized.source ?? normalized.start ?? fromId;
+      normalized.toId = normalized.toId ?? normalized.to ?? normalized.toNode ?? normalized.toNodeId ?? normalized.target ?? normalized.end ?? toId;
+      // ensure the canvas-style fields are present too
+      normalized.fromNode = normalized.fromNode ?? normalized.fromId;
+      normalized.toNode = normalized.toNode ?? normalized.toId;
+
+      normalized.fromSide = normalized.fromSide ?? normalized.startSide ?? normalized.sourceSide ?? normalized.startAnchor ?? normalized.startHandle ?? d.fromSide;
+      normalized.toSide = normalized.toSide ?? normalized.endSide ?? normalized.targetSide ?? normalized.endAnchor ?? normalized.endHandle ?? d.toSide;
+
+      normalized.fromId = String(normalized.fromId);
+      normalized.toId = String(normalized.toId);
+
+      edgesAdded.push(normalized);
+
+      // Also update canvasJson.edges immediately so subsequent desiredEdges see it
+      canvasJson.edges.push(normalized);
+    } catch (err) {
+      console.warn("[z5Linter] Failed to create edge for", { fromId, toId, err });
+    }
+  }
+
+  // Final dedupe pass (keeps first occurrence)
+  const removedAfter = dedupeCanvasEdges(canvasJson);
+  if (removedAfter > 0) {
+    console.debug(`[z5Linter] ensureTemplateEdges removed ${removedAfter} duplicate edges during final dedupe`);
+  }
+
+  return edgesAdded.length;
+}
+
+
+
+
+
+
+
+
+
+// canvas validation
+
+
+/**
+ * Scan canvasJson and mark nodes with missing templateFamily or templateVersion.
+ * - A node is considered valid if either:
+ *   - node.metadata.z5LinterAttributes.templateFamily and .templateVersion are present (non-empty), OR
+ *   - node.metadata.templateFamily and node.metadata.templateVersion are present (non-empty)
+ * - Invalid nodes get node.color = "1"
+ *
+ * Returns the number of nodes marked (changed).
+ */
+export function scanAndMarkInvalidTemplateNodes(canvasJson: any): number {
+  if (!canvasJson || !Array.isArray(canvasJson.nodes)) {
+    throw new Error("Invalid canvas JSON");
+  }
+
+  let changed = 0;
+
+  for (const node of canvasJson.nodes) {
+    // Skip nodes that are not objects
+    if (!node || typeof node !== "object") continue;
+
+    const z5 = node?.metadata?.z5LinterAttributes;
+    const md = node?.metadata;
+
+    const family = (z5 && z5.templateFamily) || md?.templateFamily;
+    const version = (z5 && z5.templateVersion) || md?.templateVersion;
+
+    const hasFamily = typeof family === "string" && family.trim().length > 0;
+    const hasVersion = typeof version === "string" && version.trim().length > 0;
+
+    const isValid = hasFamily && hasVersion;
+
+    // If invalid, mark red by setting color = "1"
+    if (!isValid) {
+      if (node.color !== "1") {
+        node.color = "1";
+        changed++;
+      }
+    } else {
+      // If previously marked and now valid, optionally clear the color.
+      // Comment out the next block if you prefer to leave existing color alone.
+      if (node.color === "1") {
+        delete node.color;
+        changed++;
+      }
+    }
+  }
+
+  return changed;
+}
+
+
+
+
+// returns the path for the migration canvas from the provided migration family name
+function getCanvasPathForMigration(migrationName: string): string {
+  // implement mapping logic or lookup table
+  return `testMigrationData/${migrationName}.canvas`;
+}
+
+
+// Normalize a value to a canonical string for comparisons
+function normStr(v: any): string {
+  if (v === null || typeof v === "undefined") return "";
+  return String(v).trim().toLowerCase();
+}
+
+// Read family/version/role/areaId from a node robustly and normalize them
+function readNodeAttrs(n: any) {
+  const z5 = n?.metadata?.z5LinterAttributes ?? {};
+  const md = n?.metadata ?? {};
+  const familyRaw = z5.templateFamily ?? md.templateFamily ?? "";
+  const versionRaw = z5.templateVersion ?? md.templateVersion ?? "";
+  const roleRaw = z5.role ?? md.role ?? n.type ?? "";
+  const areaIdRaw = z5.areaId ?? md.areaId ?? "";
+  return {
+    family: normStr(familyRaw),
+    version: normStr(versionRaw),
+    role: normStr(roleRaw),
+    areaId: normStr(areaIdRaw),
+  };
 }

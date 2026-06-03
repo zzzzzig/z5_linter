@@ -11,6 +11,13 @@ import { VaultLinter } from "./vault_linter";
 import { registerCanvasCommands } from "./canvas_wrapper";
 // registerRunTestMigrationCommandUpdated.ts
 
+// invoker to trigger actions from buttons or user code
+import { registerActionInvoker } from "./invoker";
+
+
+// setup the codeblock for toolbars
+import { registerCodeblockToolbar, registerDefaultToolbarActions } from "./codeblock_toolbar";
+
 import { v4 as uuidv4 } from "uuid";
 
 
@@ -57,9 +64,16 @@ export default class z5Linter extends Plugin {
     await this.loadSettings();
 
 
+    // register the global invoker once
+    registerActionInvoker(this);
+    
     registerCanvasCommands(this.app, this);
-    registerRunTestMigrationCommand(this.app, this)
+    registerRunTestMigrationCommand(this.app, this);
 
+    // 1) register the codeblock processor and renderer helpers
+    registerCodeblockToolbar(this);
+    // 2) register the default toolbar actions (stubs or real handlers)
+    registerDefaultToolbarActions();
 
     // instantiate linter engine (it reads plugin.settings internally)
     this.linter = new Z5LinterEngine(this);
@@ -576,4 +590,43 @@ export function registerRunTestMigrationCommand(app: App, plugin: Plugin) {
       }
     },
   });
+}
+
+
+
+
+// Helper: create a toolbar DOM element (returns the element)
+function createToolbarElement(actions: Array<{ label: string; name: string; args?: any; secondary?: boolean }>, opts?: { debug?: boolean }) {
+  const toolbar = document.createElement("div");
+  toolbar.classList.add("z5-toolbar");
+  if (opts?.debug) toolbar.classList.add("z5-toolbar--debug");
+
+  for (const a of actions) {
+    const btn = document.createElement("button");
+    btn.textContent = a.label;
+    if (a.secondary) btn.classList.add("z5-btn-secondary");
+    btn.setAttribute("aria-label", a.label);
+
+    btn.onclick = async () => {
+      try {
+        const res = await (window as any).z5Linter.invoke(a.name, a.args || {});
+        if (res && res.message) {
+          // Prefer plugin-side Notice API if available
+          if ((window as any).Obsidian && (window as any).Obsidian.Notice) {
+            new (window as any).Obsidian.Notice(res.message);
+          } else {
+            // fallback
+            console.log("z5Linter:", res);
+          }
+        }
+      } catch (err) {
+        console.error("z5Linter toolbar action error:", err);
+        try { new (window as any).Obsidian.Notice(`${a.label} failed: ${String(err)}`); } catch {}
+      }
+    };
+
+    toolbar.appendChild(btn);
+  }
+
+  return toolbar;
 }
